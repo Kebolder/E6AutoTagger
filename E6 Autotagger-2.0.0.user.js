@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         E6 Autotagger
 // @namespace    https://MeusArtis.ca
-// @version      2.0.0
-// @author       Meus Artis (Modified by Slop Dragon. Aka Jax)
+// @version      2.0.1
+// @author       Jax (Slop_Dragon) (Original by Meus Artis)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
 // @match        https://e621.net/uploads/new
@@ -28,6 +28,14 @@
             localEndpoint: GM_getValue('localEndpoint', DEFAULT_CONFIG.localEndpoint),
             confidence: GM_getValue('confidence', DEFAULT_CONFIG.confidence)
         };
+    }
+
+    function formatTags(tagString) {
+        const tags = tagString.split(',').map(tag => tag.trim());
+
+        return tags.map(tag => {
+            return tag.replace(/\s+/g, '_');
+        }).join(' ');
     }
 
     function showConfigUI() {
@@ -162,7 +170,8 @@
                             try {
                                 const json = JSON.parse(aiResponse.responseText);
                                 if (textarea && json.data && json.data[0]) {
-                                    textarea.value = json.data[0];
+                                    // Format the tags before setting the textarea value
+                                    textarea.value = formatTags(json.data[0]);
                                     lastSuccessfulCheck = Date.now();
                                     setConnectedState();
                                 } else {
@@ -238,7 +247,6 @@
         warningText.textContent = "⚠️ Not connected to JTP Pilot";
         warningText.style.color = "red";
 
-        // I dont know why its called a throbber to this day lmao
         let throbber = document.createElement("div");
         throbber.textContent = "⏳ Processing...";
         throbber.style.position = "absolute";
