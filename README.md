@@ -9,8 +9,10 @@ Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP
 ## Features
 * Confidence threshold **0.1 - 1**
 * Configurable endpoint (Defaults to http://127.0.0.1:7860/run/predict)
+* Blacklist tags from being added
 * Status indacator
 
+![image](https://github.com/user-attachments/assets/e1a7e8b7-53af-415f-8a3b-5c56f3ede74e)
 
   
 ## Usage
