@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         E6 Autotagger
-// @namespace    https://MeusArtis.ca
-// @version      2.0.1
-// @author       Jax (Slop_Dragon) (Original by Meus Artis)
+// @version      2.0.2
+// @author       Jax (Slop_Dragon) Originally by Meus Artis
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
 // @match        https://e621.net/uploads/new
@@ -20,31 +19,114 @@
 (function() {
     const DEFAULT_CONFIG = {
         localEndpoint: 'http://127.0.0.1:7860/api/predict',
-        confidence: 0.25
+        confidence: 0.25,
+        tagBlacklist: ''
     };
 
     function getConfig() {
         return {
             localEndpoint: GM_getValue('localEndpoint', DEFAULT_CONFIG.localEndpoint),
-            confidence: GM_getValue('confidence', DEFAULT_CONFIG.confidence)
+            confidence: GM_getValue('confidence', DEFAULT_CONFIG.confidence),
+            tagBlacklist: GM_getValue('tagBlacklist', DEFAULT_CONFIG.tagBlacklist)
         };
     }
 
+    function normalizeTag(tag) {
+        tag = tag.toLowerCase().trim();
+        if (tag.includes(' ')) {
+            return tag.replace(/\s+/g, '_');
+        } else if (tag.includes('_')) {
+            return tag.replace(/_+/g, '_');
+        }
+        return tag;
+    }
+
     function formatTags(tagString) {
+        const config = getConfig();
+        const blacklist = config.tagBlacklist
+            .split(',')
+            .map(tag => normalizeTag(tag))
+            .filter(tag => tag.length > 0);
+
         const tags = tagString.split(',').map(tag => tag.trim());
 
-        return tags.map(tag => {
-            return tag.replace(/\s+/g, '_');
-        }).join(' ');
+        return tags
+            .filter(tag => !blacklist.includes(normalizeTag(tag)))
+            .map(tag => {
+                return tag.replace(/\s+/g, '_');
+            })
+            .join(' ');
     }
 
     function showConfigUI() {
         const config = getConfig();
-        const endpoint = prompt('Enter local AI endpoint URL:', config.localEndpoint);
-        if (endpoint !== null) {
-            GM_setValue('localEndpoint', endpoint);
+
+        const dialog = document.createElement('dialog');
+        dialog.style.padding = '20px';
+        dialog.style.borderRadius = '8px';
+        dialog.style.backgroundColor = '#2a2a2a';
+        dialog.style.color = '#fff';
+        dialog.style.border = '1px solid #666';
+
+        const form = document.createElement('form');
+        form.style.display = 'flex';
+        form.style.flexDirection = 'column';
+        form.style.gap = '15px';
+
+        const endpointLabel = document.createElement('label');
+        endpointLabel.textContent = 'Local AI Endpoint URL:';
+        const endpointInput = document.createElement('input');
+        endpointInput.type = 'text';
+        endpointInput.value = config.localEndpoint;
+        endpointInput.style.width = '100%';
+        endpointInput.style.padding = '5px';
+
+        const blacklistLabel = document.createElement('label');
+        blacklistLabel.textContent = 'Tag Blacklist:';
+        const blacklistInput = document.createElement('textarea');
+        blacklistInput.value = config.tagBlacklist;
+        blacklistInput.style.width = '100%';
+        blacklistInput.style.height = '100px';
+        blacklistInput.style.padding = '5px';
+        blacklistInput.placeholder = 'Place tags here you do not want the tagger to parse (comma separated). Both formats work: "blue_eyes" or "blue eyes"';
+
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '10px';
+        buttonContainer.style.justifyContent = 'flex-end';
+
+        const saveButton = document.createElement('button');
+        saveButton.textContent = 'Save';
+        saveButton.type = 'submit';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+
+        form.appendChild(endpointLabel);
+        form.appendChild(endpointInput);
+        form.appendChild(blacklistLabel);
+        form.appendChild(blacklistInput);
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(saveButton);
+        form.appendChild(buttonContainer);
+        dialog.appendChild(form);
+
+        document.body.appendChild(dialog);
+        dialog.showModal();
+
+        form.onsubmit = (e) => {
+            e.preventDefault();
+            GM_setValue('localEndpoint', endpointInput.value);
+            GM_setValue('tagBlacklist', blacklistInput.value);
             checkConnection();
-        }
+            dialog.close();
+            dialog.remove();
+        };
+
+        cancelButton.onclick = () => {
+            dialog.close();
+            dialog.remove();
+        };
     }
 
     GM_registerMenuCommand('Configure Local Tagger Endpoint', showConfigUI);
@@ -135,7 +217,6 @@
         const config = getConfig();
         let img = document.querySelector(".upload_preview_img");
         if (!img) {
-            console.error("No image found!");
             return;
         }
 
@@ -170,7 +251,6 @@
                             try {
                                 const json = JSON.parse(aiResponse.responseText);
                                 if (textarea && json.data && json.data[0]) {
-                                    // Format the tags before setting the textarea value
                                     textarea.value = formatTags(json.data[0]);
                                     lastSuccessfulCheck = Date.now();
                                     setConnectedState();
@@ -239,9 +319,6 @@
         confidenceInput.style.width = "60px";
         confidenceInput.addEventListener("change", (e) => updateConfidence(e.target.value));
 
-        confidenceContainer.appendChild(confidenceLabel);
-        confidenceContainer.appendChild(confidenceInput);
-
         let warningText = document.createElement("span");
         warningText.classList.add("ai-warning-text");
         warningText.textContent = "⚠️ Not connected to JTP Pilot";
@@ -257,6 +334,9 @@
         throbber.style.zIndex = "1000";
         throbber.style.marginTop = "1%";
         throbber.style.marginLeft = "15%";
+
+        confidenceContainer.appendChild(confidenceLabel);
+        confidenceContainer.appendChild(confidenceInput);
 
         button.onclick = () => {
             if (button.textContent === "Connect") {
