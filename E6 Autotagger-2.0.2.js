@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         E6 Autotagger
-// @version      2.0.2
+// @version      2.0.3
 // @author       Jax (Slop_Dragon) Originally by Meus Artis
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -212,7 +212,7 @@
             }
         });
     }
-
+    // Remember kids always update your textareas or else your tags get sent to the shadow realm (bug)
     function processImage(button, textarea, throbber) {
         const config = getConfig();
         let img = document.querySelector(".upload_preview_img");
@@ -251,7 +251,19 @@
                             try {
                                 const json = JSON.parse(aiResponse.responseText);
                                 if (textarea && json.data && json.data[0]) {
+                                    // Set the value and trigger necessary events
                                     textarea.value = formatTags(json.data[0]);
+
+                                    // Trigger input event
+                                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+                                    // Trigger change event
+                                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+
+                                    // Focus and blur to ensure the form registers the change
+                                    textarea.focus();
+                                    textarea.blur();
+
                                     lastSuccessfulCheck = Date.now();
                                     setConnectedState();
                                 } else {
