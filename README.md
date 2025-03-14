@@ -3,7 +3,7 @@
 ## [Original/Base by meusartis](https://github.com/Meus-Artis/e6AutoTagger) Recoded and improved by Me!
 
 
-Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP Pilot](https://huggingface.co/RedRocket/JointTaggerProject) furry auto tagger on all 3 E6 based websites (E621, E629, E6AI).
+~Not so~ Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP Pilot](https://huggingface.co/RedRocket/JointTaggerProject) furry auto tagger on all 3 E6 based websites (E621, E629, E6AI).
 
 
 ## Features
@@ -12,9 +12,11 @@ Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP
 * Blacklist tags from being added (Prevents tags from being added)
 * Auto tag to be added (This is like a section where the User can put tags they want to be ALWAYS added)
 * Anti tag nuke button (Makes it so tags don't get nuked when auto tagging things)
+* Tag auto suggest (Suggests tag in the config boxes like in the normal tag box)
 * Status indacator
 
-![image](https://github.com/user-attachments/assets/e1a7e8b7-53af-415f-8a3b-5c56f3ede74e)
+![image](https://github.com/user-attachments/assets/4d88bc9e-db0e-48f2-a955-a8e0536fe970)
+
 
   
 ## Usage
