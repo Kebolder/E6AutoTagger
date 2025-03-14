@@ -9,7 +9,9 @@ Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP
 ## Features
 * Confidence threshold **0.1 - 1**
 * Configurable endpoint (Defaults to http://127.0.0.1:7860/run/predict)
-* Blacklist tags from being added
+* Blacklist tags from being added (Prevents tags from being added)
+* Auto tag to be added (This is like a section where the User can put tags they want to be ALWAYS added)
+* Anti tag nuke button (Makes it so tags don't get nuked when auto tagging things)
 * Status indacator
 
 ![image](https://github.com/user-attachments/assets/e1a7e8b7-53af-415f-8a3b-5c56f3ede74e)
