@@ -8,7 +8,7 @@
 
 ## Features
 * Confidence threshold **0.1 - 1**
-* Configurable endpoint (Defaults to http://127.0.0.1:7860/run/predict)
+* Configurable endpoint (Defaults to http://127.0.0.1:7860/api/predict)
 * Blacklist tags from being added (Prevents tags from being added)
 * Auto tag to be added (This is like a section where the User can put tags they want to be ALWAYS added)
 * Anti tag nuke button (Makes it so tags don't get nuked when auto tagging things)
