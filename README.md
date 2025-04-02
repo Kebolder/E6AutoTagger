@@ -14,8 +14,8 @@
 * Anti tag nuke button (Makes it so tags don't get nuked when auto tagging things)
 * Tag auto suggest (Suggests tag in the config boxes like in the normal tag box)
 * Status indacator
+![image](https://github.com/user-attachments/assets/4f1b1be5-fd2b-42d8-a82d-946cec856412)
 
-![image](https://github.com/user-attachments/assets/4d88bc9e-db0e-48f2-a955-a8e0536fe970)
 
 
   
