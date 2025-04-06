@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         E6 Autotagger 2.2
-// @version      2.2
+// @name         E6 Autotagger 2.3
+// @version      2.3
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -33,9 +33,10 @@
         confidence: 0.25,
         tagBlacklist: '',
         autoTags: '',
-        preserveExistingTags: false
+        preserveExistingTags: false,
+        sortTagsAlphabetically: false,
+        enableAutoTagOnEdit: false,
     };
-
     const selectors = {
         button: '.ai-tag-button',
         warningText: '.ai-warning-text',
@@ -52,7 +53,9 @@
             confidence: GM_getValue('confidence', DEFAULT_CONFIG.confidence),
             tagBlacklist: GM_getValue('tagBlacklist', DEFAULT_CONFIG.tagBlacklist),
             autoTags: GM_getValue('autoTags', DEFAULT_CONFIG.autoTags),
-            preserveExistingTags: GM_getValue('preserveExistingTags', DEFAULT_CONFIG.preserveExistingTags)
+            preserveExistingTags: GM_getValue('preserveExistingTags', DEFAULT_CONFIG.preserveExistingTags),
+            sortTagsAlphabetically: GM_getValue('sortTagsAlphabetically', DEFAULT_CONFIG.sortTagsAlphabetically),
+            enableAutoTagOnEdit: GM_getValue('enableAutoTagOnEdit', DEFAULT_CONFIG.enableAutoTagOnEdit)
         };
 
         if (!config.localEndpoint.endsWith('/api/predict')) {
@@ -62,6 +65,7 @@
         return config;
     };
 
+
     const getElement = selector => document.querySelector(selector);
 
     const normalizeTag = tag => {
@@ -70,7 +74,7 @@
         tag.includes('_') ? tag.replace(/_+/g, '_') : tag;
     };
 
-    const formatTags = (tagString, existingTags = '') => {
+    const formatTags = (tagString, existingTags = '', sortAlphabetically = false) => {
         tagString = typeof tagString === 'string' ? tagString : '';
 
         const config = getConfig();
@@ -84,18 +88,32 @@
         .filter(tag => !blacklist.includes(normalizeTag(tag)))
         .map(tag => tag.replace(/\s+/g, '_'));
 
+        let resultTags = [];
+
         if (config.preserveExistingTags && existingTags.trim()) {
             const existingTagsArray = existingTags.trim().split(/\s+/);
-            const combinedTags = [...new Set([...existingTagsArray, ...newTags])];
-            return combinedTags.join(' ');
+            resultTags = [...new Set([...existingTagsArray, ...newTags])];
+        } else {
+            resultTags = newTags;
         }
 
-        return newTags.join(' ');
+        if (sortAlphabetically) {
+            resultTags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+        }
+
+        return resultTags.join(' ');
     };
 
     const applyAutoTags = (textarea) => {
         const config = getConfig();
         if (!textarea || !config.autoTags.trim()) return;
+
+        const isEditPage = window.location.href.includes('/posts/') && !window.location.href.includes('/uploads/new');
+
+        if (isEditPage && !config.enableAutoTagOnEdit) {
+            console.log("Auto tag on edit is disabled, skipping auto tags application");
+            return;
+        }
 
         const formattedAutoTags = config.autoTags
         .split(',')
@@ -120,7 +138,7 @@
 
         if (!button || !warningText) return;
 
-        button.textContent = isConnected ? "Auto Tag" : "Connect";
+        button.textContent = isConnected ? "Generate Tags" : "Connect";
         button.disabled = false;
         button.style.opacity = "1";
         button.style.cursor = "pointer";
@@ -210,7 +228,8 @@
                     const tagString = typeof json.data[0] === 'string' ? json.data[0] : '';
                     const existingTags = config.preserveExistingTags ? textarea.value : '';
 
-                    textarea.value = formatTags(tagString, existingTags);
+                    // Pass the sort configuration when generating tags
+                    textarea.value = formatTags(tagString, existingTags, config.sortTagsAlphabetically);
 
                     ['input', 'change'].forEach(eventType => {
                         textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
@@ -520,11 +539,30 @@
         blacklistContainer.appendChild(blacklistInput);
 
         addAutocompleteToTextarea(blacklistInput, blacklistContainer);
+
+        const enableAutoTagOnEditContainer = document.createElement('div');
+        enableAutoTagOnEditContainer.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-top: 5px;';
+
+        const enableAutoTagOnEditInput = document.createElement('input');
+        enableAutoTagOnEditInput.type = 'checkbox';
+        enableAutoTagOnEditInput.checked = currentConfig.enableAutoTagOnEdit;
+        enableAutoTagOnEditInput.style.cssText = 'width: 18px; height: 18px;';
+
+        const enableAutoTagOnEditLabel = document.createElement('label');
+        enableAutoTagOnEditLabel.textContent = 'Enable Auto Tag on post edit';
+        enableAutoTagOnEditLabel.style.marginLeft = '5px';
+
+        enableAutoTagOnEditContainer.appendChild(enableAutoTagOnEditInput);
+        enableAutoTagOnEditContainer.appendChild(enableAutoTagOnEditLabel);
+
         const autoTagsLabel = document.createElement('label');
         autoTagsLabel.textContent = 'Auto Tags:';
 
         const autoTagsContainer = document.createElement('div');
         autoTagsContainer.style.position = 'relative';
+
+        autoTagsContainer.appendChild(enableAutoTagOnEditContainer);
+        autoTagsContainer.appendChild(document.createElement('br'));
         autoTagsContainer.appendChild(autoTagsLabel);
 
         const autoTagsInput = document.createElement('textarea');
@@ -550,6 +588,21 @@
         preserveTagsContainer.appendChild(preserveTagsInput);
         preserveTagsContainer.appendChild(preserveTagsLabel);
 
+        const sortAlphabeticallyContainer = document.createElement('div');
+        sortAlphabeticallyContainer.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-top: 5px;';
+
+        const sortAlphabeticallyInput = document.createElement('input');
+        sortAlphabeticallyInput.type = 'checkbox';
+        sortAlphabeticallyInput.checked = currentConfig.sortTagsAlphabetically;
+        sortAlphabeticallyInput.style.cssText = 'width: 18px; height: 18px;';
+
+        const sortAlphabeticallyLabel = document.createElement('label');
+        sortAlphabeticallyLabel.textContent = 'Sort tags alphabetically';
+        sortAlphabeticallyLabel.style.marginLeft = '5px';
+
+        sortAlphabeticallyContainer.appendChild(sortAlphabeticallyInput);
+        sortAlphabeticallyContainer.appendChild(sortAlphabeticallyLabel);
+
         const buttonContainer = document.createElement('div');
         buttonContainer.style.cssText = 'display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;';
 
@@ -572,6 +625,7 @@
         container.appendChild(blacklistContainer);
         container.appendChild(autoTagsContainer);
         container.appendChild(preserveTagsContainer);
+        container.appendChild(sortAlphabeticallyContainer);
 
         dialog.appendChild(title);
         dialog.appendChild(container);
@@ -596,13 +650,17 @@
                 const blacklist = blacklistInput.value.trim();
                 const autoTags = autoTagsInput.value.trim();
                 const preserveExisting = preserveTagsInput.checked;
+                const sortAlphabetically = sortAlphabeticallyInput.checked;
+                const enableAutoTagOnEdit = enableAutoTagOnEditInput.checked;
 
                 console.log("Saving settings:", {
                     endpoint,
                     confidence,
                     blacklist,
                     autoTags,
-                    preserveExisting
+                    preserveExisting,
+                    sortAlphabetically,
+                    enableAutoTagOnEdit
                 });
 
                 if (!endpoint) {
@@ -619,6 +677,8 @@
                 GM_setValue('tagBlacklist', blacklist);
                 GM_setValue('autoTags', autoTags);
                 GM_setValue('preserveExistingTags', preserveExisting);
+                GM_setValue('sortTagsAlphabetically', sortAlphabetically);
+                GM_setValue('enableAutoTagOnEdit', enableAutoTagOnEdit);
 
                 console.log("Settings saved successfully");
 
@@ -665,6 +725,10 @@
             textarea = document.querySelector("textarea.tag-textarea[name='post[tag_string]']");
         }
 
+        if (!textarea) {
+            textarea = document.querySelector("textarea[name='post[tag_string]']");
+        }
+
         return textarea;
     };
 
@@ -686,10 +750,16 @@
         controlsContainer.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 10px;";
         controlsContainer.classList.add('ai-controls-container');
 
-        const button = document.createElement("button");
-        button.textContent = "Connect";
-        button.classList.add("toggle-button", "ai-tag-button");
-        button.title = "Using Local JTP Pilot²";
+        const generateButton = document.createElement("button");
+        generateButton.textContent = "Connect";
+        generateButton.classList.add("toggle-button", "ai-tag-button");
+        generateButton.title = "Using Local JTP Pilot²";
+
+        const sortButton = document.createElement("button");
+        sortButton.textContent = "Sort Tags A-Z";
+        sortButton.classList.add("toggle-button", "sort-tags-button");
+        sortButton.title = "Sort all tags alphabetically";
+        sortButton.style.cssText = "margin-left: 5px;";
 
         const confidenceContainer = document.createElement("div");
         confidenceContainer.style.cssText = "display: flex; align-items: center;";
@@ -710,8 +780,8 @@
             const newValue = parseFloat(e.target.value);
             updateConfidence(newValue);
 
-            button.disabled = false;
-            button.style.opacity = "1";
+            generateButton.disabled = false;
+            generateButton.style.opacity = "1";
 
             console.log(`Tag page confidence updated to: ${newValue}`);
         });
@@ -724,18 +794,34 @@
         confidenceContainer.appendChild(confidenceLabel);
         confidenceContainer.appendChild(confidenceInput);
 
-        button.onclick = () => {
-            if (button.textContent === "Connect") {
+        const sortTagsAlphabetically = () => {
+            if (!textarea || !textarea.value.trim()) return;
+
+            const tags = textarea.value.trim().split(/\s+/);
+            tags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+
+            textarea.value = tags.join(' ');
+
+            ['input', 'change'].forEach(eventType => {
+                textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+            });
+        };
+
+        sortButton.onclick = sortTagsAlphabetically;
+
+        generateButton.onclick = () => {
+            if (generateButton.textContent === "Connect") {
                 checkConnection();
             } else {
                 const throbber = document.createElement("div");
                 throbber.textContent = "⏳ Processing...";
                 throbber.style.cssText = "position: absolute; background: rgba(0, 0, 0, 0.5); color: white; padding: 2vh; border-radius: 1vh; z-index: 1000; margin-top: 1%; margin-left: 15%;";
-                processImage(button, textarea, throbber);
+                processImage(generateButton, textarea, throbber);
             }
         };
 
-        controlsContainer.appendChild(button);
+        controlsContainer.appendChild(generateButton);
+        controlsContainer.appendChild(sortButton);
         controlsContainer.appendChild(confidenceContainer);
         controlsContainer.appendChild(warningText);
 
@@ -781,12 +867,28 @@
         applyAutoTags(textarea);
     };
 
+    const initializedPages = new Set();
+    let isWatchingEditButton = false;
+
     const init = () => {
         console.log("E6 Autotagger initializing...");
 
-        addControls();
+        if (document.querySelector('.ai-controls-container')) {
+            console.log("Controls already added, skipping initialization");
+            return;
+        }
 
+        const textarea = getTagTextarea();
+        if (!textarea) {
+            console.log("No tag textarea found, initialization failed");
+            return;
+        }
+
+        console.log("Found textarea, adding controls");
+        addControls();
         setTimeout(checkConnection, 100);
+
+        initializedPages.add(window.location.href);
     };
 
     GM_registerMenuCommand('Configure Local Tagger Endpoint', showConfigUI);
@@ -798,15 +900,104 @@
         window.addEventListener("load", init);
     }
 
+
     const checkForEditPage = () => {
         const currentUrl = window.location.href;
-        if (currentUrl.includes('/posts/') && document.getElementById("post_tag_string")) {
-            console.log("Detected edit page via URL check, initializing...");
-            init();
+
+        if (currentUrl.includes('/posts/') && !currentUrl.includes('/uploads/new')) {
+            const tagTextarea = getTagTextarea();
+            if (tagTextarea) {
+                if (!initializedPages.has(currentUrl)) {
+                    console.log("Detected edit page with tag textarea, initializing...");
+                    initializedPages.add(currentUrl);
+                    init();
+                }
+                return;
+            }
+
+            const editButton = document.getElementById('side-edit-link');
+            if (editButton && !isWatchingEditButton) {
+                console.log("Found edit button, watching for click...");
+                isWatchingEditButton = true;
+
+                editButton.addEventListener('click', () => {
+                    console.log("Edit button clicked, waiting for tag textarea...");
+
+                    setTimeout(() => {
+                        const textarea = getTagTextarea();
+                        if (textarea) {
+                            console.log("Tag textarea found immediately after edit button click");
+                            if (!initializedPages.has(currentUrl)) {
+                                initializedPages.add(currentUrl);
+                                init();
+                            }
+                            return;
+                        }
+
+                        const observer = new MutationObserver((mutations, obs) => {
+                            const tagTextarea = getTagTextarea();
+                            if (tagTextarea) {
+                                console.log("Tag textarea appeared after edit button click");
+                                obs.disconnect();
+
+                                setTimeout(() => {
+                                    if (!initializedPages.has(currentUrl)) {
+                                        initializedPages.add(currentUrl);
+                                        init();
+                                    }
+                                }, 300);
+                            }
+                        });
+
+                        observer.observe(document.body, {
+                            childList: true,
+                            subtree: true,
+                            attributes: true,
+                            characterData: false
+                        });
+
+                        setTimeout(() => {
+                            observer.disconnect();
+                        }, 10000);
+                    }, 300);
+                });
+            }
         }
     };
 
-    setInterval(checkForEditPage, 2000);
+    const handleUrlChange = () => {
+        let lastUrl = location.href;
 
-    window.addEventListener("load", addControls);
+        console.log("Setting up URL change monitor");
+
+        const observer = new MutationObserver(() => {
+            if (location.href !== lastUrl) {
+                console.log("URL changed from", lastUrl, "to", location.href);
+                lastUrl = location.href;
+
+                if (connectionCheckInterval) {
+                    clearInterval(connectionCheckInterval);
+                    connectionCheckInterval = null;
+                }
+
+                initializedPages.clear();
+                isWatchingEditButton = false;
+
+                setTimeout(() => {
+                    checkForEditPage();
+                }, 500);
+            }
+        });
+
+        observer.observe(document, {subtree: true, childList: true});
+    };
+
+    document.addEventListener("DOMContentLoaded", () => {
+        setTimeout(checkForEditPage, 500);
+    });
+
+    window.addEventListener("load", () => {
+        setTimeout(checkForEditPage, 500);
+        handleUrlChange();
+    });
 })();
