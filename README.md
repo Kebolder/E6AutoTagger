@@ -8,15 +8,17 @@
 
 ## Features
 * Confidence threshold **0.1 - 1**
+* Tag sort button + Setting when Generating tags
 * Configurable endpoint (Defaults to http://127.0.0.1:7860/api/predict)
 * Blacklist tags from being added (Prevents tags from being added)
 * Auto tag to be added (This is like a section where the User can put tags they want to be ALWAYS added)
 * Anti tag nuke button (Makes it so tags don't get nuked when auto tagging things)
 * Tag auto suggest (Suggests tag in the config boxes like in the normal tag box)
 * Status indacator
+* 
+![image](https://github.com/user-attachments/assets/d3247533-c95a-4e6d-a570-731baaa26fdb)
+![image](https://github.com/user-attachments/assets/9815ed40-87f0-45d5-9c0e-e9cb1e97f2cc)
 
-![image](https://github.com/user-attachments/assets/4f1b1be5-fd2b-42d8-a82d-946cec856412)
-![image](https://github.com/user-attachments/assets/ebdff8ba-9bf5-4861-8201-2b589e5e88eb)
 
 
 
