@@ -22,7 +22,8 @@
 * Status indacator
   
 ![image](https://github.com/user-attachments/assets/d3247533-c95a-4e6d-a570-731baaa26fdb)
-![image](https://github.com/user-attachments/assets/9815ed40-87f0-45d5-9c0e-e9cb1e97f2cc)
+![image](https://github.com/user-attachments/assets/04575d13-6d59-48d6-962a-e86fbcc218ad)
+
 
 
 
