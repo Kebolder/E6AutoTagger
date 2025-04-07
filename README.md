@@ -1,5 +1,10 @@
 # E6AutoTagger
 
+# CURRERNTLY ONLY WORKS WITH GRADIO 3
+## PLEASE USE [THIS VERSION OF JTP2](https://files.catbox.moe/tgkbh4.7z)
+
+
+
 ## [Original/Base by meusartis](https://github.com/Meus-Artis/e6AutoTagger) Recoded and improved by Me!
 
 
