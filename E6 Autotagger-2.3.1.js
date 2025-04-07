@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         E6 Autotagger 2.3.1
-// @version      2.3.1
+// @name         E6 Autotagger 2.3.2
+// @version      2.3.2
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -36,6 +36,7 @@
         preserveExistingTags: false,
         sortTagsAlphabetically: false,
         enableAutoTagOnEdit: false,
+        sortingMode: 'flat',
     };
     const selectors = {
         button: '.ai-tag-button',
@@ -55,7 +56,8 @@
             autoTags: GM_getValue('autoTags', DEFAULT_CONFIG.autoTags),
             preserveExistingTags: GM_getValue('preserveExistingTags', DEFAULT_CONFIG.preserveExistingTags),
             sortTagsAlphabetically: GM_getValue('sortTagsAlphabetically', DEFAULT_CONFIG.sortTagsAlphabetically),
-            enableAutoTagOnEdit: GM_getValue('enableAutoTagOnEdit', DEFAULT_CONFIG.enableAutoTagOnEdit)
+            enableAutoTagOnEdit: GM_getValue('enableAutoTagOnEdit', DEFAULT_CONFIG.enableAutoTagOnEdit),
+            sortingMode: GM_getValue('sortingMode', DEFAULT_CONFIG.sortingMode)
         };
 
         if (!config.localEndpoint.endsWith('/api/predict')) {
@@ -64,7 +66,6 @@
 
         return config;
     };
-
 
     const getElement = selector => document.querySelector(selector);
 
@@ -91,17 +92,35 @@
         let resultTags = [];
 
         if (config.preserveExistingTags && existingTags.trim()) {
-            const existingTagsArray = existingTags.trim().split(/\s+/);
+            const existingTagsArray = existingTags.trim().split(/[\s\n]+/);
             resultTags = [...new Set([...existingTagsArray, ...newTags])];
         } else {
             resultTags = newTags;
         }
 
-        if (sortAlphabetically) {
-            resultTags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-        }
+        resultTags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
-        return resultTags.join(' ');
+        if (config.sortingMode === 'grouped') {
+            const groupedTags = {};
+
+            resultTags.forEach(tag => {
+                const firstLetter = tag.charAt(0).toLowerCase();
+                if (!groupedTags[firstLetter]) {
+                    groupedTags[firstLetter] = [];
+                }
+                groupedTags[firstLetter].push(tag);
+            });
+
+            const rows = Object.keys(groupedTags).sort().map(letter =>
+                                                             groupedTags[letter].join(' ')
+                                                            );
+
+            return rows.join('\n');
+        } else if (config.sortingMode === 'oneperline') {
+            return resultTags.join('\n');
+        } else {
+            return resultTags.join(' ');
+        }
     };
 
     const applyAutoTags = (textarea) => {
@@ -229,7 +248,8 @@
                     const existingTags = config.preserveExistingTags ? textarea.value : '';
 
                     // Pass the sort configuration when generating tags
-                    textarea.value = formatTags(tagString, existingTags, config.sortTagsAlphabetically);
+                    // Always sort when generating tags, and pass in the sortingMode through config
+                    textarea.value = formatTags(tagString, existingTags, true);
 
                     ['input', 'change'].forEach(eventType => {
                         textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
@@ -603,6 +623,70 @@
         sortAlphabeticallyContainer.appendChild(sortAlphabeticallyInput);
         sortAlphabeticallyContainer.appendChild(sortAlphabeticallyLabel);
 
+        const sortingModeContainer = document.createElement('div');
+        sortingModeContainer.style.cssText = 'margin-top: 15px;';
+
+        const sortingModeLabel = document.createElement('label');
+        sortingModeLabel.textContent = 'Default Tag Format:';
+        sortingModeContainer.appendChild(sortingModeLabel);
+
+        const sortingModeOptionsContainer = document.createElement('div');
+        sortingModeOptionsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-top: 5px;';
+
+        const flatModeContainer = document.createElement('div');
+        flatModeContainer.style.cssText = 'display: flex; align-items: center;';
+
+        const flatModeInput = document.createElement('input');
+        flatModeInput.type = 'radio';
+        flatModeInput.name = 'sortingMode';
+        flatModeInput.value = 'flat';
+        flatModeInput.checked = currentConfig.sortingMode === 'flat';
+        flatModeInput.style.marginRight = '5px';
+
+        const flatModeLabel = document.createElement('label');
+        flatModeLabel.textContent = 'Flat (all tags in a single line)';
+
+        flatModeContainer.appendChild(flatModeInput);
+        flatModeContainer.appendChild(flatModeLabel);
+
+        const onePerLineContainer = document.createElement('div');
+        onePerLineContainer.style.cssText = 'display: flex; align-items: center;';
+
+        const onePerLineInput = document.createElement('input');
+        onePerLineInput.type = 'radio';
+        onePerLineInput.name = 'sortingMode';
+        onePerLineInput.value = 'oneperline';
+        onePerLineInput.checked = currentConfig.sortingMode === 'oneperline';
+        onePerLineInput.style.marginRight = '5px';
+
+        const onePerLineLabel = document.createElement('label');
+        onePerLineLabel.textContent = 'One Per Line (each tag on a separate line)';
+
+        onePerLineContainer.appendChild(onePerLineInput);
+        onePerLineContainer.appendChild(onePerLineLabel);
+
+        const groupedModeContainer = document.createElement('div');
+        groupedModeContainer.style.cssText = 'display: flex; align-items: center;';
+
+        const groupedModeInput = document.createElement('input');
+        groupedModeInput.type = 'radio';
+        groupedModeInput.name = 'sortingMode';
+        groupedModeInput.value = 'grouped';
+        groupedModeInput.checked = currentConfig.sortingMode === 'grouped';
+        groupedModeInput.style.marginRight = '5px';
+
+        const groupedModeLabel = document.createElement('label');
+        groupedModeLabel.textContent = 'Grouped (tags organized by first letter)';
+
+        groupedModeContainer.appendChild(groupedModeInput);
+        groupedModeContainer.appendChild(groupedModeLabel);
+
+        sortingModeOptionsContainer.appendChild(flatModeContainer);
+        sortingModeOptionsContainer.appendChild(onePerLineContainer);
+        sortingModeOptionsContainer.appendChild(groupedModeContainer);
+
+        sortingModeContainer.appendChild(sortingModeOptionsContainer);
+
         const buttonContainer = document.createElement('div');
         buttonContainer.style.cssText = 'display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;';
 
@@ -626,6 +710,7 @@
         container.appendChild(autoTagsContainer);
         container.appendChild(preserveTagsContainer);
         container.appendChild(sortAlphabeticallyContainer);
+        container.appendChild(sortingModeContainer);
 
         dialog.appendChild(title);
         dialog.appendChild(container);
@@ -652,6 +737,7 @@
                 const preserveExisting = preserveTagsInput.checked;
                 const sortAlphabetically = sortAlphabeticallyInput.checked;
                 const enableAutoTagOnEdit = enableAutoTagOnEditInput.checked;
+                const sortingMode = document.querySelector('input[name="sortingMode"]:checked').value;
 
                 console.log("Saving settings:", {
                     endpoint,
@@ -660,7 +746,8 @@
                     autoTags,
                     preserveExisting,
                     sortAlphabetically,
-                    enableAutoTagOnEdit
+                    enableAutoTagOnEdit,
+                    sortingMode
                 });
 
                 if (!endpoint) {
@@ -679,6 +766,7 @@
                 GM_setValue('preserveExistingTags', preserveExisting);
                 GM_setValue('sortTagsAlphabetically', sortAlphabetically);
                 GM_setValue('enableAutoTagOnEdit', enableAutoTagOnEdit);
+                GM_setValue('sortingMode', sortingMode);
 
                 console.log("Settings saved successfully");
 
@@ -735,16 +823,14 @@
     const addControls = () => {
         let textarea = getTagTextarea();
         if (!textarea) {
-            console.log("No tag textarea found");
             return;
         }
 
         if (document.querySelector('.ai-tag-button')) {
-            console.log("Controls already added");
             return;
         }
 
-        console.log("Found textarea:", textarea.id);
+        const config = getConfig();
 
         const controlsContainer = document.createElement("div");
         controlsContainer.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 10px;";
@@ -756,9 +842,9 @@
         generateButton.title = "Using Local JTP Pilot²";
 
         const sortButton = document.createElement("button");
-        sortButton.textContent = "Sort Tags A-Z";
+        sortButton.textContent = "Sort Tags";
         sortButton.classList.add("toggle-button", "sort-tags-button");
-        sortButton.title = "Sort all tags alphabetically";
+        sortButton.title = "Sort tags according to your preferred format";
         sortButton.style.cssText = "margin-left: 5px;";
 
         const confidenceContainer = document.createElement("div");
@@ -782,8 +868,6 @@
 
             generateButton.disabled = false;
             generateButton.style.opacity = "1";
-
-            console.log(`Tag page confidence updated to: ${newValue}`);
         });
 
         const warningText = document.createElement("span");
@@ -797,17 +881,48 @@
         const sortTagsAlphabetically = () => {
             if (!textarea || !textarea.value.trim()) return;
 
-            const tags = textarea.value.trim().split(/\s+/);
+            const config = getConfig();
+            const tags = textarea.value.trim().split(/[\s\n]+/);
             tags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
-            textarea.value = tags.join(' ');
+            if (config.sortingMode === 'grouped') {
+                const groupedTags = {};
+
+                tags.forEach(tag => {
+                    const firstLetter = tag.charAt(0).toLowerCase();
+                    if (!groupedTags[firstLetter]) {
+                        groupedTags[firstLetter] = [];
+                    }
+                    groupedTags[firstLetter].push(tag);
+                });
+
+                const rows = Object.keys(groupedTags).sort().map(letter =>
+                                                                 groupedTags[letter].join(' ')
+                                                                );
+
+                textarea.value = rows.join('\n');
+            } else if (config.sortingMode === 'oneperline') {
+                textarea.value = tags.join('\n');
+            } else {
+                textarea.value = tags.join(' ');
+            }
 
             ['input', 'change'].forEach(eventType => {
-                textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+                const event = new Event(eventType, { bubbles: false, cancelable: true });
+                textarea.dispatchEvent(event);
             });
+
+            textarea.focus();
+
+            return false;
         };
 
-        sortButton.onclick = sortTagsAlphabetically;
+        sortButton.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            sortTagsAlphabetically();
+            return false;
+        };
 
         generateButton.onclick = () => {
             if (generateButton.textContent === "Connect") {
@@ -832,30 +947,24 @@
                 const headerElement = tagsContainer.querySelector(".header");
                 if (headerElement) {
                     headerElement.parentNode.insertBefore(controlsContainer, headerElement.nextSibling);
-                    console.log("Inserted controls after header");
                 } else {
                     const tagStringEditor = document.getElementById("tag-string-editor");
                     if (tagStringEditor) {
                         tagsContainer.insertBefore(controlsContainer, tagStringEditor);
-                        console.log("Inserted controls before tag-string-editor");
                     } else {
                         tagsContainer.insertBefore(controlsContainer, tagsContainer.firstChild);
-                        console.log("Inserted controls at the top of tags-container");
                     }
                 }
             } else {
                 const textareaParent = textarea.closest("div");
                 if (textareaParent && textareaParent.parentNode) {
                     textareaParent.parentNode.insertBefore(controlsContainer, textareaParent);
-                    console.log("Inserted controls before textarea's closest div");
                 } else {
                     textarea.parentElement.insertBefore(controlsContainer, textarea);
-                    console.log("Inserted controls directly before textarea");
                 }
             }
         } else {
             textarea.parentElement.insertBefore(controlsContainer, textarea);
-            console.log("Inserted controls on upload page");
         }
 
         if (connectionCheckInterval) {
