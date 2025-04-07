@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         E6 Autotagger 2.3
-// @version      2.3
+// @name         E6 Autotagger 2.3.1
+// @version      2.3.1
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -915,18 +915,22 @@
                 return;
             }
 
-            const editButton = document.getElementById('side-edit-link');
-            if (editButton && !isWatchingEditButton) {
-                console.log("Found edit button, watching for click...");
+            const sideEditButton = document.getElementById('side-edit-link');
+            const postEditButton = document.getElementById('post-edit-link');
+
+            const editButtons = [sideEditButton, postEditButton].filter(button => button !== null);
+
+            if (editButtons.length > 0 && !isWatchingEditButton) {
+                console.log("Found edit buttons, watching for clicks...");
                 isWatchingEditButton = true;
 
-                editButton.addEventListener('click', () => {
-                    console.log("Edit button clicked, waiting for tag textarea...");
+                const handleEditAction = () => {
+                    console.log("Edit action triggered, waiting for tag textarea...");
 
                     setTimeout(() => {
                         const textarea = getTagTextarea();
                         if (textarea) {
-                            console.log("Tag textarea found immediately after edit button click");
+                            console.log("Tag textarea found immediately after edit action");
                             if (!initializedPages.has(currentUrl)) {
                                 initializedPages.add(currentUrl);
                                 init();
@@ -937,7 +941,7 @@
                         const observer = new MutationObserver((mutations, obs) => {
                             const tagTextarea = getTagTextarea();
                             if (tagTextarea) {
-                                console.log("Tag textarea appeared after edit button click");
+                                console.log("Tag textarea appeared after edit action");
                                 obs.disconnect();
 
                                 setTimeout(() => {
@@ -960,7 +964,21 @@
                             observer.disconnect();
                         }, 10000);
                     }, 300);
+                };
+
+                editButtons.forEach(button => {
+                    button.addEventListener('click', handleEditAction);
                 });
+
+                if (currentUrl.includes('/posts/')) {
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key === 'e' &&
+                            !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) &&
+                            !e.ctrlKey && !e.altKey && !e.metaKey) {
+                            handleEditAction();
+                        }
+                    });
+                }
             }
         }
     };
