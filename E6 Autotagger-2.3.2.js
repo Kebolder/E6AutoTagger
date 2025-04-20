@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         E6 Autotagger 2.3.2
-// @version      2.3.2
+// @name         E6 Autotagger 2.3.3
+// @version      2.3.3
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -22,9 +22,6 @@
 // @connect      e6ai.net
 // ==/UserScript==
 
-
-
-// TO WHOM READS THIS CODE BE WARNED IT SUCKS!!!!!!!!!!
 (function() {
     'use strict';
 
@@ -37,123 +34,492 @@
         sortTagsAlphabetically: false,
         enableAutoTagOnEdit: false,
         sortingMode: 'flat',
+        requestTimeout: 10000,
+        maxRetries: 2,
     };
-    const selectors = {
+
+    const CSS = {
+        button: `
+            .ai-tag-button {
+                display: inline-block;
+                border: 1px solid var(--fg-color-alt, #666);
+                padding: 5px 10px;
+                border-radius: 4px;
+                cursor: pointer;
+                margin: 5px 0;
+                background-color: var(--button-bg-color, #4a4a4a);
+                color: var(--button-text-color, white);
+            }
+            .ai-tag-button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+        `,
+        suggestions: `
+            .tag-suggestions-container {
+                position: absolute;
+                max-height: 200px;
+                width: 100%;
+                overflow-y: auto;
+                background-color: var(--bg-color, #333);
+                border: 1px solid var(--fg-color-alt, #666);
+                border-radius: 4px;
+                z-index: 1000;
+                display: none;
+            }
+            .tag-suggestion {
+                padding: 5px 10px;
+                cursor: pointer;
+                border-bottom: 1px solid var(--border-color, #555);
+            }
+            .tag-suggestion.active {
+                background-color: var(--bg-color-alt, #444);
+            }
+            .tag-count {
+                float: right;
+                opacity: 0.7;
+            }
+        `,
+        dialog: `
+            #e6-autotagger-config {
+                padding: 20px;
+                border-radius: 8px;
+                background-color: var(--dialog-bg-color, #2a2a2a);
+                color: var(--text-color, #fff);
+                border: 1px solid var(--fg-color-alt, #666);
+                min-width: 400px;
+                max-width: 600px;
+                max-height: 80vh;
+                overflow-y: auto;
+                z-index: 999;
+            }
+            .config-row {
+                margin-bottom: 15px;
+                position: relative;
+            }
+            .config-input {
+                width: 100%;
+                padding: 5px;
+                background-color: var(--input-bg-color, #333);
+                color: #000;
+                border: 1px solid var(--fg-color-alt, #666);
+                border-radius: 4px;
+                box-sizing: border-box;
+                resize: vertical;
+                max-height: 150px;
+            }
+            .config-status {
+                margin-top: 10px;
+                padding: 10px;
+                border-radius: 4px;
+            }
+        `,
+    };
+
+    const SELECTORS = {
         button: '.ai-tag-button',
         warningText: '.ai-warning-text',
         confidenceInput: '.ai-confidence-input',
-        uploadPreview: '.upload_preview_img'
+        uploadPreview: '.upload_preview_img',
+        tagTextarea: '#post_tags',
+        editTagTextarea: '#post_tag_string',
     };
 
-    let connectionCheckInterval;
-    let lastSuccessfulCheck = 0;
+    const TAG_CATEGORIES = {
+        0: '#b4c7d9',
+        1: '#ed5d1f', 
+        3: '#d0d',    
+        4: '#0f0',    
+        5: '#ed5881', 
+        6: '#ff3f3f', 
+        7: '#fff'     
+    };
 
-    const getConfig = () => {
-        const config = {
-            localEndpoint: GM_getValue('localEndpoint', DEFAULT_CONFIG.localEndpoint),
-            confidence: GM_getValue('confidence', DEFAULT_CONFIG.confidence),
-            tagBlacklist: GM_getValue('tagBlacklist', DEFAULT_CONFIG.tagBlacklist),
-            autoTags: GM_getValue('autoTags', DEFAULT_CONFIG.autoTags),
-            preserveExistingTags: GM_getValue('preserveExistingTags', DEFAULT_CONFIG.preserveExistingTags),
-            sortTagsAlphabetically: GM_getValue('sortTagsAlphabetically', DEFAULT_CONFIG.sortTagsAlphabetically),
-            enableAutoTagOnEdit: GM_getValue('enableAutoTagOnEdit', DEFAULT_CONFIG.enableAutoTagOnEdit),
-            sortingMode: GM_getValue('sortingMode', DEFAULT_CONFIG.sortingMode)
-        };
+    const state = {
+        config: null,
+        connectionCheckInterval: null,
+        lastSuccessfulCheck: 0,
+        initializedPages: new Set(),
+        isWatchingEditButton: false,
+        observers: [],
+        eventListeners: []
+    };
+
+    const elementCache = new Map();
+
+    const DEBUG = {
+        enabled: false,
+        log: function(...args) {
+            if (this.enabled) console.log('[E6T]', ...args);
+        },
+        info: function(...args) {
+            if (this.enabled) console.info('[E6T]', ...args);
+        },
+        warn: function(...args) {
+            if (this.enabled) console.warn('[E6T]', ...args);
+        },
+        error: function(...args) {
+            if (this.enabled) console.error('[E6T]', ...args);
+        },
+        toggle: function() {
+            this.enabled = !this.enabled;
+            console.log(`[E6Tagger] Debug logging is now ${this.enabled ? 'enabled' : 'disabled'}`);
+            return this.enabled;
+        }
+    };
+    
+    GM_registerMenuCommand('Toggle Console logs', () => DEBUG.toggle());
+
+    const loadConfig = () => {
+        DEBUG.log('Config', 'Loading configuration');
+        const config = { ...DEFAULT_CONFIG };
+        
+        for (const key in DEFAULT_CONFIG) {
+            config[key] = GM_getValue(key, DEFAULT_CONFIG[key]);
+        }
 
         if (!config.localEndpoint.endsWith('/api/predict')) {
             config.localEndpoint = config.localEndpoint.replace(/\/$/, '') + '/api/predict';
+            DEBUG.log('Config', 'Adjusted API endpoint format', config.localEndpoint);
         }
 
+        state.config = config;
+        DEBUG.log('Config', 'Configuration loaded', config);
         return config;
     };
 
-    const getElement = selector => document.querySelector(selector);
+    const saveConfig = (newConfig) => {
+        DEBUG.log('Config', 'Saving new configuration', newConfig);
+        
+        for (const key in newConfig) {
+            if (key in DEFAULT_CONFIG) {
+                GM_setValue(key, newConfig[key]);
+            }
+        }
+        state.config = { ...state.config, ...newConfig };
+        DEBUG.log('Config', 'Configuration saved successfully');
+    };
+
+    const getElement = (selector, parent = document, forceRefresh = false) => {
+        const cacheKey = parent === document ? selector : `${parent.id || 'parent'}-${selector}`;
+        
+        if (!forceRefresh && elementCache.has(cacheKey)) {
+            return elementCache.get(cacheKey);
+        }
+        
+        const element = parent.querySelector(selector);
+        if (element) {
+            elementCache.set(cacheKey, element);
+        }
+        return element;
+    };
+
+    const createDebounce = (func, delay) => {
+        let timer;
+        return (...args) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => func(...args), delay);
+        };
+    };
+
+    const addStyles = () => {
+        if (!document.getElementById('e6-autotagger-styles')) {
+            const computedStyle = getComputedStyle(document.body);
+            const themeMainAttr = document.body.getAttribute('data-th-main') || 'bloodlust';
+            
+            const getThemeColors = () => {
+                const cssVars = {
+                    '--bg-color': '#333',
+                    '--bg-color-alt': '#444',
+                    '--text-color': '#fff',
+                    '--button-bg-color': '#4a4a4a',
+                    '--button-text-color': 'white',
+                    '--dialog-bg-color': '#2a2a2a',
+                    '--input-bg-color': '#333',
+                    '--fg-color-alt': '#666',
+                    '--border-color': '#555'
+                };
+                
+                try {
+                    const accentColor = document.querySelector('meta[name="theme-color"]')?.getAttribute('content') || '#00549e';
+                    cssVars['--accent-color'] = accentColor;
+                    
+                    const navBg = computedStyle.getPropertyValue('--nav-bg-color') || 
+                                 getBackgroundColor('.navigation') || 
+                                 '#2e2e2e';
+                    
+                    const pageBg = computedStyle.getPropertyValue('--page-bg-color') || 
+                                  getBackgroundColor('#page') || 
+                                  '#343434';
+                    
+                    const inputBg = computedStyle.getPropertyValue('--input-bg-color') || 
+                                   getBackgroundColor('input[type="text"]') || 
+                                   '#454545';
+                    
+                    const sectionColor = computedStyle.getPropertyValue('--color-section') || 
+                                       getBackgroundColor('.box-section') ||
+                                       getBackgroundColor('.section') ||
+                                       navBg;
+
+                    cssVars['--bg-color'] = pageBg;
+                    cssVars['--bg-color-alt'] = adjustBrightness(pageBg, 20);
+                    cssVars['--dialog-bg-color'] = sectionColor;
+                    cssVars['--input-bg-color'] = inputBg;
+                    cssVars['--button-bg-color'] = '#ffffff';
+                    cssVars['--button-text-color'] = '#000000';
+                    
+                    const isDark = isColorDark(pageBg);
+                    cssVars['--text-color'] = isDark ? '#fff' : '#000';
+                    
+                    cssVars['--fg-color-alt'] = adjustBrightness(pageBg, isDark ? 50 : -50);
+                    cssVars['--border-color'] = adjustBrightness(pageBg, isDark ? 30 : -30);
+                } catch (e) {
+                    console.error('Error detecting theme colors:', e);
+                }
+                
+                return cssVars;
+            };
+            
+            const getBackgroundColor = (selector) => {
+                const element = document.querySelector(selector);
+                if (!element) return null;
+                return window.getComputedStyle(element).backgroundColor;
+            };
+            
+            const isColorDark = (color) => {
+                try {
+                    let r, g, b;
+                    
+                    if (color.startsWith('#')) {
+                        const hex = color.substring(1);
+                        r = parseInt(hex.substr(0, 2), 16);
+                        g = parseInt(hex.substr(2, 2), 16);
+                        b = parseInt(hex.substr(4, 2), 16);
+                    } else if (color.startsWith('rgb')) {
+                        const rgbValues = color.match(/\d+/g);
+                        if (rgbValues && rgbValues.length >= 3) {
+                            r = parseInt(rgbValues[0]);
+                            g = parseInt(rgbValues[1]);
+                            b = parseInt(rgbValues[2]);
+                        } else {
+                            return true;
+                        }
+                    } else {
+                        return true;
+                    }
+                    
+                    const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+                    return brightness < 0.5;
+                } catch (e) {
+                    console.error('Error checking color brightness:', e);
+                    return true;
+                }
+            };
+            
+            const adjustBrightness = (color, percent) => {
+                try {
+                    let r, g, b;
+                    
+                    if (color.startsWith('#')) {
+                        const hex = color.substring(1);
+                        r = parseInt(hex.substr(0, 2), 16);
+                        g = parseInt(hex.substr(2, 2), 16);
+                        b = parseInt(hex.substr(4, 2), 16);
+                    } else if (color.startsWith('rgb')) {
+                        const rgbValues = color.match(/\d+/g);
+                        if (rgbValues && rgbValues.length >= 3) {
+                            r = parseInt(rgbValues[0]);
+                            g = parseInt(rgbValues[1]);
+                            b = parseInt(rgbValues[2]);
+                        } else {
+                            return color;
+                        }
+                    } else {
+                        return color;
+                    }
+                    
+                    r = Math.max(0, Math.min(255, r + percent));
+                    g = Math.max(0, Math.min(255, g + percent));
+                    b = Math.max(0, Math.min(255, b + percent));
+                    
+                    return `rgb(${r}, ${g}, ${b})`;
+                } catch (e) {
+                    console.error('Error adjusting color brightness:', e);
+                    return color;
+                }
+            };
+            
+            const themeColors = getThemeColors();
+            
+            const cssVarsString = Object.entries(themeColors)
+                .map(([key, value]) => `${key}: ${value};`)
+                .join('\n');
+            
+            const styleElement = document.createElement('style');
+            styleElement.id = 'e6-autotagger-styles';
+            styleElement.textContent = `:root {\n${cssVarsString}\n}\n${Object.values(CSS).join('\n')}`;
+            document.head.appendChild(styleElement);
+        }
+    };
+
+    const registerEventListener = (element, event, handler, options) => {
+        element.addEventListener(event, handler, options);
+        state.eventListeners.push({ element, event, handler });
+    };
+
+    const registerObserver = (observer) => {
+        state.observers.push(observer);
+        return observer;
+    };
+
+    const clearResources = () => {
+        state.eventListeners.forEach(({ element, event, handler }) => {
+            element.removeEventListener(event, handler);
+        });
+        state.eventListeners = [];
+
+        state.observers.forEach(observer => observer.disconnect());
+        state.observers = [];
+
+        if (state.connectionCheckInterval) {
+            clearInterval(state.connectionCheckInterval);
+            state.connectionCheckInterval = null;
+        }
+
+        elementCache.clear();
+    };
 
     const normalizeTag = tag => {
         tag = tag.toLowerCase().trim();
         return tag.includes(' ') ? tag.replace(/\s+/g, '_') :
-        tag.includes('_') ? tag.replace(/_+/g, '_') : tag;
+            tag.includes('_') ? tag.replace(/_+/g, '_') : tag;
     };
 
-    const formatTags = (tagString, existingTags = '', sortAlphabetically = false) => {
+    const formatTags = (tagString, existingTags = '') => {
+        DEBUG.log('Tags', 'Formatting tags', { 
+            tagStringLength: tagString?.length, 
+            existingTagsLength: existingTags?.length 
+        });
+        
         tagString = typeof tagString === 'string' ? tagString : '';
+        const config = state.config;
 
-        const config = getConfig();
         const blacklist = config.tagBlacklist
-        .split(',')
-        .map(normalizeTag)
-        .filter(tag => tag.length > 0);
+            .split(',')
+            .map(normalizeTag)
+            .filter(tag => tag.length > 0);
+        
+        DEBUG.log('Tags', 'Blacklisted tags', blacklist);
 
         const newTags = tagString.split(',')
-        .map(tag => tag.trim())
-        .filter(tag => !blacklist.includes(normalizeTag(tag)))
-        .map(tag => tag.replace(/\s+/g, '_'));
+            .map(tag => tag.trim())
+            .filter(tag => tag.length > 0 && !blacklist.includes(normalizeTag(tag)))
+            .map(tag => tag.replace(/\s+/g, '_'));
+        
+        DEBUG.log('Tags', 'Processed new tags', { 
+            count: newTags.length, 
+            tagsAfterBlacklist: newTags.length 
+        });
 
         let resultTags = [];
 
         if (config.preserveExistingTags && existingTags.trim()) {
-            const existingTagsArray = existingTags.trim().split(/[\s\n]+/);
+            const existingTagsArray = existingTags.trim().split(/[\s\n]+/).filter(tag => tag.length > 0);
+            DEBUG.log('Tags', 'Preserving existing tags', { count: existingTagsArray.length });
             resultTags = [...new Set([...existingTagsArray, ...newTags])];
         } else {
-            resultTags = newTags;
+            resultTags = [...new Set(newTags)];
         }
+        
+        DEBUG.log('Tags', 'Combined tags after deduplication', { count: resultTags.length });
 
         resultTags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
-        if (config.sortingMode === 'grouped') {
-            const groupedTags = {};
-
-            resultTags.forEach(tag => {
-                const firstLetter = tag.charAt(0).toLowerCase();
-                if (!groupedTags[firstLetter]) {
-                    groupedTags[firstLetter] = [];
-                }
-                groupedTags[firstLetter].push(tag);
-            });
-
-            const rows = Object.keys(groupedTags).sort().map(letter =>
-                                                             groupedTags[letter].join(' ')
-                                                            );
-
-            return rows.join('\n');
-        } else if (config.sortingMode === 'oneperline') {
-            return resultTags.join('\n');
-        } else {
-            return resultTags.join(' ');
+        let groupedTags = {};
+        let result;
+        
+        switch (config.sortingMode) {
+            case 'grouped':
+                DEBUG.log('Tags', 'Using grouped sorting mode');
+                groupedTags = {};
+                resultTags.forEach(tag => {
+                    const firstLetter = tag.charAt(0).toLowerCase();
+                    if (!groupedTags[firstLetter]) {
+                        groupedTags[firstLetter] = [];
+                    }
+                    groupedTags[firstLetter].push(tag);
+                });
+                result = Object.keys(groupedTags).sort().map(letter => 
+                    groupedTags[letter].join(' ')
+                ).join('\n');
+                break;
+            
+            case 'oneperline':
+                DEBUG.log('Tags', 'Using one-per-line sorting mode');
+                result = resultTags.join('\n');
+                break;
+            
+            default:
+                DEBUG.log('Tags', 'Using flat sorting mode');
+                result = resultTags.join(' ');
+                break;
         }
+        
+        DEBUG.log('Tags', 'Final formatted tags', { 
+            length: result.length, 
+            sortingMode: config.sortingMode 
+        });
+        
+        return result;
     };
 
-    const applyAutoTags = (textarea) => {
-        const config = getConfig();
-        if (!textarea || !config.autoTags.trim()) return;
-
-        const isEditPage = window.location.href.includes('/posts/') && !window.location.href.includes('/uploads/new');
-
-        if (isEditPage && !config.enableAutoTagOnEdit) {
-            console.log("Auto tag on edit is disabled, skipping auto tags application");
-            return;
-        }
-
-        const formattedAutoTags = config.autoTags
-        .split(',')
-        .map(tag => tag.trim())
-        .map(tag => tag.replace(/\s+/g, '_'))
-        .join(' ');
-
-        if (config.preserveExistingTags && textarea.value.trim()) {
-            textarea.value = formatTags(formattedAutoTags, textarea.value);
-        } else {
-            textarea.value = formattedAutoTags;
-        }
-
-        ['input', 'change'].forEach(eventType => {
-            textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+    const checkConnection = (updateUI = true) => {
+        DEBUG.log('Connection', 'Checking connection to API endpoint', state.config?.localEndpoint);
+        return new Promise((resolve, reject) => {
+            const config = state.config || loadConfig();
+            
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: config.localEndpoint,
+                headers: { "Content-Type": "application/json" },
+                data: JSON.stringify({ data: ["", config.confidence], fn_index: 0 }),
+                timeout: config.requestTimeout,
+                onload: response => {
+                    try {
+                        JSON.parse(response.responseText);
+                        state.lastSuccessfulCheck = Date.now();
+                        DEBUG.info('Connection', 'Connection successful');
+                        if (updateUI) setConnectionState(true);
+                        resolve(true);
+                    } catch (e) {
+                        if (Date.now() - state.lastSuccessfulCheck > 5000 && updateUI) {
+                            setConnectionState(false);
+                        }
+                        DEBUG.error('Connection', 'Invalid response format', e);
+                        reject(new Error("Invalid response format"));
+                    }
+                },
+                onerror: (err) => {
+                    if (Date.now() - state.lastSuccessfulCheck > 5000 && updateUI) {
+                        setConnectionState(false);
+                    }
+                    DEBUG.error('Connection', 'Connection failed', err);
+                    reject(err);
+                },
+                ontimeout: () => {
+                    if (Date.now() - state.lastSuccessfulCheck > 5000 && updateUI) {
+                        setConnectionState(false);
+                    }
+                    DEBUG.error('Connection', 'Connection timed out');
+                    reject(new Error("Connection timed out"));
+                }
+            });
         });
     };
 
     const setConnectionState = isConnected => {
-        const button = getElement(selectors.button);
-        const warningText = getElement(selectors.warningText);
+        const button = getElement(SELECTORS.button);
+        const warningText = getElement(SELECTORS.warningText);
 
         if (!button || !warningText) return;
 
@@ -161,167 +527,206 @@
         button.disabled = false;
         button.style.opacity = "1";
         button.style.cursor = "pointer";
-        warningText.textContent = isConnected ? "⚠️ Manually review tags" : "⚠️ Not connected to JTP Pilot";
+        
+        if (isConnected) {
+            button.style.backgroundColor = "#a6ffb0";
+            button.style.color = "#000";
+            button.style.borderColor = "#85cc8e";
+        } else {
+            button.style.backgroundColor = "";
+            button.style.color = "";
+            button.style.borderColor = "";
+        }
+        
+        warningText.textContent = isConnected ? "⚠️ Manually review tags" : "⚠️ Not connected to AI endpoint";
         warningText.style.color = isConnected ? "yellow" : "red";
     };
 
-    const updateConfidence = value => {
-        value = Math.max(0.1, Math.min(1, parseFloat(value) || 0.25));
-        GM_setValue('confidence', value);
-
-        const input = getElement(selectors.confidenceInput);
-        if (input) input.value = value.toFixed(2);
-
-        const configSlider = document.getElementById('confidence-slider');
-        if (configSlider) configSlider.value = value;
-
-        const configLabel = document.getElementById('confidence-label');
-        if (configLabel) configLabel.textContent = `Confidence Threshold: ${value}`;
-
-        console.log(`Confidence updated to: ${value}`);
+    const startConnectionCheck = () => {
+        if (state.connectionCheckInterval) {
+            clearInterval(state.connectionCheckInterval);
+        }
+        
+        checkConnection().catch(() => {});
+        
+        state.connectionCheckInterval = setInterval(() => {
+            checkConnection().catch(() => {});
+        }, 30000); 
+        
+        return state.connectionCheckInterval;
     };
 
-    const checkConnection = () => {
-        const config = getConfig();
-        const button = getElement(selectors.button);
-
-        if (!button) return;
-
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.localEndpoint,
-            headers: { "Content-Type": "application/json" },
-            data: JSON.stringify({ data: ["", config.confidence], fn_index: 0 }),
-            timeout: 3000,
-            onload: response => {
-                try {
-                    JSON.parse(response.responseText);
-                    lastSuccessfulCheck = Date.now();
-                    setConnectionState(true);
-                } catch (e) {
-                    if (Date.now() - lastSuccessfulCheck > 5000) {
-                        setConnectionState(false);
-                    }
-                }
-            },
-            onerror: () => {
-                if (Date.now() - lastSuccessfulCheck > 5000) {
-                    setConnectionState(false);
-                }
-            },
-            ontimeout: () => {
-                if (Date.now() - lastSuccessfulCheck > 5000) {
-                    setConnectionState(false);
-                }
-            }
+    const fetchImage = async (imageUrl) => {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: imageUrl,
+                responseType: "blob",
+                timeout: state.config.requestTimeout,
+                onload: response => resolve(response.response),
+                onerror: err => reject(new Error(`Error fetching image: ${err.error || 'Unknown error'}`)),
+                ontimeout: () => reject(new Error("Image fetch timed out"))
+            });
         });
     };
 
-    const processImage = (button, textarea, throbber) => {
-        const config = getConfig();
+    const sendToAI = async (imageDataUrl, retryCount = 0) => {
+        const config = state.config || loadConfig();
+        DEBUG.log('API Send', 'Preparing to send to AI with confidence:', config.confidence);
+        
+        try {
+            return await new Promise((resolve, reject) => {
+                const payload = {
+                    data: [imageDataUrl, config.confidence],
+                    fn_index: 0
+                };
+                DEBUG.log('API Send', 'Sending payload:', payload);
 
-        let img = getElement(selectors.uploadPreview);
-
-        if (!img) {
-            img = document.querySelector('#image') ||
-                document.querySelector('.original-file-unchanged') ||
-                document.querySelector('#image-container img') ||
-                document.querySelector('img[id^="image-"]') ||
-                document.querySelector('.image-container img') ||
-                document.querySelector('#preview img');
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: config.localEndpoint,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    data: JSON.stringify(payload),
+                    timeout: config.requestTimeout,
+                    onload: response => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            resolve(result);
+                        } catch (err) {
+                            reject(new Error(`Invalid AI response: ${err.message}`));
+                        }
+                    },
+                    onerror: err => reject(new Error(`AI request failed: ${err.error || 'Unknown error'}`)),
+                    ontimeout: () => reject(new Error("AI request timed out"))
+                });
+            });
+        } catch (error) {
+            if (retryCount < config.maxRetries) {
+                console.log(`AI request failed, retrying (${retryCount + 1}/${config.maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return sendToAI(imageDataUrl, retryCount + 1);
+            }
+            throw error;
         }
+    };
+
+    const processImage = async (button, textarea, throbber) => {
+        if (!button || !textarea) {
+            DEBUG.warn('Process', 'Missing button or textarea elements');
+            return;
+        }
+        
+        DEBUG.log('Process', 'Starting image processing');
+        
+        const img = getElement(SELECTORS.uploadPreview) || 
+                    document.querySelector('#image') ||
+                    document.querySelector('.original-file-unchanged') ||
+                    document.querySelector('#image-container img') ||
+                    document.querySelector('img[id^="image-"]') ||
+                    document.querySelector('.image-container img') ||
+                    document.querySelector('#preview img');
 
         if (!img) {
+            DEBUG.error('Process', 'Could not find image preview');
             alert("Could not find the image preview. Please try again.");
             return;
         }
 
         button.disabled = true;
         button.style.opacity = "0.5";
-        textarea.parentElement.insertBefore(throbber, textarea);
+        if (throbber) textarea.parentElement.insertBefore(throbber, textarea);
+        
+        DEBUG.log('Process', 'Found image', { src: img.src, width: img.width, height: img.height });
 
-        const handleAIResponse = aiResponse => {
-            try {
-                const json = JSON.parse(aiResponse.responseText);
-                if (textarea && json.data && json.data[0]) {
-                    const tagString = typeof json.data[0] === 'string' ? json.data[0] : '';
-                    const existingTags = config.preserveExistingTags ? textarea.value : '';
+        try {
+            DEBUG.log('Process', 'Fetching image blob');
+            const imageBlob = await fetchImage(img.src);
+            DEBUG.log('Process', 'Image blob fetched', { size: imageBlob.size, type: imageBlob.type });
+            
+            const reader = new FileReader();
+            const imageDataUrl = await new Promise((resolve, reject) => {
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(imageBlob);
+            });
+            
+            DEBUG.log('Process', 'Image converted to base64', { dataUrlLength: imageDataUrl.length });
+            
+            DEBUG.log('Process', 'Sending image to AI for processing');
+            const aiResponse = await sendToAI(imageDataUrl);
+            
+            DEBUG.log('Process', 'Received AI response', aiResponse);
+            
+            if (aiResponse.data && aiResponse.data[0]) {
+                const tagString = typeof aiResponse.data[0] === 'string' ? aiResponse.data[0] : '';
+                const existingTags = state.config.preserveExistingTags ? textarea.value : '';
 
-                    // Pass the sort configuration when generating tags
-                    // Always sort when generating tags, and pass in the sortingMode through config
-                    textarea.value = formatTags(tagString, existingTags, true);
+                DEBUG.info('Process', 'Processing tags', { 
+                    newTagCount: tagString.split(',').filter(t => t.trim()).length,
+                    existingTagCount: existingTags.split(/\s+/).filter(t => t.trim()).length,
+                    preserveExisting: state.config.preserveExistingTags
+                });
 
-                    ['input', 'change'].forEach(eventType => {
-                        textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
-                    });
+                textarea.value = formatTags(tagString, existingTags);
+                DEBUG.info('Process', 'Tags applied to textarea', { 
+                    finalTagCount: textarea.value.split(/\s+/).filter(t => t.trim()).length
+                });
 
-                    textarea.focus();
-                    textarea.blur();
+                ['input', 'change'].forEach(eventType => {
+                    textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+                });
 
-                    lastSuccessfulCheck = Date.now();
-                    setConnectionState(true);
-                } else {
-                    alert("Invalid response format from AI");
-                    checkConnection();
-                }
-            } catch (err) {
-                alert("Error parsing AI response: " + err.message);
-                checkConnection();
+                textarea.focus();
+                textarea.blur();
+
+                state.lastSuccessfulCheck = Date.now();
+                setConnectionState(true);
+            } else {
+                DEBUG.error('Process', 'Invalid AI response format', aiResponse);
+                throw new Error("Invalid response format from AI");
             }
+        } catch (error) {
+            DEBUG.error('Process', 'Error processing image', error);
+            alert(error.message);
+            checkConnection();
+        } finally {
             button.disabled = false;
             button.style.opacity = "1";
-            throbber.remove();
-        };
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: img.src,
-            responseType: "blob",
-            onload: response => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    GM_xmlhttpRequest({
-                        method: "POST",
-                        url: config.localEndpoint,
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Accept": "application/json"
-                        },
-                        data: JSON.stringify({
-                            data: [reader.result, config.confidence],
-                            fn_index: 0
-                        }),
-                        onload: handleAIResponse,
-                        onerror: err => {
-                            alert("Error connecting to AI: " + err.error);
-                            checkConnection();
-                            button.disabled = false;
-                            button.style.opacity = "1";
-                            throbber.remove();
-                        }
-                    });
-                };
-                reader.readAsDataURL(response.response);
-            },
-            onerror: err => {
-                alert("Error fetching image: " + err.error);
-                button.disabled = false;
-                button.style.opacity = "1";
-                throbber.remove();
-            }
-        });
+            if (throbber) throbber.remove();
+            DEBUG.log('Process', 'Image processing completed');
+        }
     };
 
-    const addAutocompleteToTextarea = (textarea, containerDiv) => {
+    const addAutocompleteToTextarea = (textarea, containerDiv, isCommaSeparated = false) => {
+        if (!textarea || !containerDiv) return;
+        
+        const suggestionsClass = isCommaSeparated ? 'tag-suggestions-container-config' : 'tag-suggestions-container';
+        const existingSuggestions = containerDiv.querySelector(`.${suggestionsClass}`);
+        if (existingSuggestions) return;
+        
         const suggestionsContainer = document.createElement('div');
-        suggestionsContainer.className = 'tag-suggestions-container';
-        suggestionsContainer.style.cssText = 'position: absolute; max-height: 200px; width: 100%; overflow-y: auto; background-color: #333; border: 1px solid #666; border-radius: 4px; z-index: 1000; display: none;';
+        suggestionsContainer.className = `${suggestionsClass} tag-suggestions-container`;
+        suggestionsContainer.style.zIndex = '1001';
         containerDiv.appendChild(suggestionsContainer);
 
-        const fetchSuggestions = (term) => {
-            if (term.length < 3) {
+        let currentSuggestions = [];
+        let activeIndex = -1;
+        let currentTagSegment = { term: '', start: -1, end: -1 };
+
+        const fetchSuggestions = createDebounce((term) => {
+            term = term.trim();
+            if (!term || term.length < 3) {
                 suggestionsContainer.style.display = 'none';
+                currentSuggestions = [];
+                activeIndex = -1;
                 return;
             }
+
+            suggestionsContainer.innerHTML = '';
+            suggestionsContainer.style.display = 'none';
 
             GM_xmlhttpRequest({
                 method: "GET",
@@ -332,60 +737,48 @@
                 },
                 onload: (response) => {
                     try {
-                        const tags = JSON.parse(response.responseText);
-                        suggestionsContainer.innerHTML = '';
-
+                        const responseData = JSON.parse(response.responseText);
+                        const tags = Array.isArray(responseData) ? responseData : [];
+                        
                         if (tags.length === 0) {
                             suggestionsContainer.style.display = 'none';
+                            currentSuggestions = [];
+                            activeIndex = -1;
                             return;
                         }
 
-                        tags.forEach(tag => {
+                        const fragment = document.createDocumentFragment();
+                        currentSuggestions = tags;
+                        activeIndex = -1;
+
+                        tags.forEach((tag, index) => {
                             const suggestion = document.createElement('div');
                             suggestion.className = 'tag-suggestion';
+                            suggestion.dataset.index = index;
                             suggestion.textContent = tag.name.replace(/_/g, ' ');
-                            suggestion.style.cssText = 'padding: 5px 10px; cursor: pointer; border-bottom: 1px solid #555;';
-
-                            const categoryColors = {
-                                0: '#b4c7d9', // general
-                                1: '#ed5d1f', // artist/director
-                                3: '#d0d', // copyright/franchise
-                                4: '#0f0', // character
-                                5: '#ed5881', // species
-                                6: '#ff3f3f', // invalid
-                                7: '#fff' // meta
-                            };
-
-                            suggestion.style.color = categoryColors[tag.category] || '#fff';
+                            suggestion.style.color = TAG_CATEGORIES[tag.category] || '#fff';
 
                             const countLabel = document.createElement('span');
+                            countLabel.className = 'tag-count';
                             countLabel.textContent = tag.post_count.toLocaleString();
-                            countLabel.style.cssText = 'float: right; opacity: 0.7;';
                             suggestion.appendChild(countLabel);
 
-                            suggestion.addEventListener('click', () => {
-                                addTagToTextarea(textarea, tag.name);
-                                suggestionsContainer.style.display = 'none';
-                            });
-
-                            suggestion.addEventListener('mouseenter', () => {
-                                Array.from(suggestionsContainer.querySelectorAll('.tag-suggestion')).forEach(s => {
-                                    s.classList.remove('active');
-                                });
-                                suggestion.classList.add('active');
-                            });
-
-                            suggestionsContainer.appendChild(suggestion);
+                            fragment.appendChild(suggestion);
                         });
 
-                        const style = document.createElement('style');
-                        style.textContent = '.tag-suggestion.active { background-color: #444; }';
-                        document.head.appendChild(style);
+                        suggestionsContainer.innerHTML = '';
+                        suggestionsContainer.appendChild(fragment);
+
+                        suggestionsContainer.addEventListener('click', handleSuggestionClick);
+                        suggestionsContainer.addEventListener('mouseover', handleSuggestionMouseover);
 
                         const rect = textarea.getBoundingClientRect();
+                        const parentRect = containerDiv.getBoundingClientRect();
+                        suggestionsContainer.style.position = 'absolute';
+                        suggestionsContainer.style.top = `${rect.bottom - parentRect.top}px`;
+                        suggestionsContainer.style.left = `${rect.left - parentRect.left}px`;
                         suggestionsContainer.style.width = `${rect.width}px`;
                         suggestionsContainer.style.display = 'block';
-
                     } catch (error) {
                         console.error("Error parsing tag suggestions:", error);
                         suggestionsContainer.style.display = 'none';
@@ -395,620 +788,610 @@
                     suggestionsContainer.style.display = 'none';
                 }
             });
+        }, 300);
+
+        const handleSuggestionClick = (e) => {
+            const suggestion = e.target.closest('.tag-suggestion');
+            if (suggestion) {
+                const index = parseInt(suggestion.dataset.index, 10);
+                if (index >= 0 && index < currentSuggestions.length) {
+                    addTagToTextarea(textarea, currentSuggestions[index].name, isCommaSeparated);
+                    suggestionsContainer.style.display = 'none';
+                }
+            }
         };
 
-        const addTagToTextarea = (textarea, tagName) => {
+        const handleSuggestionMouseover = (e) => {
+             const suggestion = e.target.closest('.tag-suggestion');
+             if (suggestion) {
+                 const suggestions = suggestionsContainer.querySelectorAll('.tag-suggestion');
+                 suggestions.forEach(s => s.classList.remove('active'));
+                 suggestion.classList.add('active');
+                 activeIndex = parseInt(suggestion.dataset.index, 10);
+             }
+         };
+
+        const addTagToTextarea = (textarea, tagName, isList) => {
+            const currentValue = textarea.value;
             const cursorPosition = textarea.selectionStart;
-            const textBeforeCursor = textarea.value.substring(0, cursorPosition);
-            const textAfterCursor = textarea.value.substring(cursorPosition);
 
-            const lastCommaPos = textBeforeCursor.lastIndexOf(',');
-            const startPos = lastCommaPos === -1 ? 0 : lastCommaPos + 1;
+            let newValue;
+            let newCursorPos;
 
-            const newTextBeforeCursor = textBeforeCursor.substring(0, startPos) +
-                  (startPos > 0 && textBeforeCursor[startPos] !== ' ' ? ' ' : '') +
-                  tagName;
+            if (isList) {
+                const segmentStart = currentTagSegment.start;
+                const segmentEnd = currentTagSegment.end;
 
-            const newValue = newTextBeforeCursor +
-                  (textAfterCursor.trim() !== '' && !textAfterCursor.trim().startsWith(',') ? ', ' : '') +
-                  textAfterCursor;
+                if (segmentStart === -1 || segmentEnd === -1) {
+                    console.error("Cannot add tag: segment info missing.");
+                    return; 
+                }
+
+                const textBeforeSegment = currentValue.substring(0, segmentStart);
+                const textAfterSegment = currentValue.substring(segmentEnd);
+                
+                let trailingCommaSpace = "";
+                const nextChar = textAfterSegment.trimStart().charAt(0);
+                 if (textAfterSegment.trim().length > 0 && nextChar !== ',') {
+                    trailingCommaSpace = ", ";
+                 } else if (textAfterSegment.trimStart().startsWith(',')) {
+                     trailingCommaSpace = " ";
+                 }
+
+                newValue = textBeforeSegment + tagName + trailingCommaSpace + textAfterSegment.trimStart();
+                newCursorPos = textBeforeSegment.length + tagName.length + trailingCommaSpace.length;
+
+            } else {
+                const textBeforeCursor = currentValue.substring(0, cursorPosition);
+                const textAfterCursor = currentValue.substring(cursorPosition);
+                const lastSpacePos = textBeforeCursor.lastIndexOf(' ');
+                const startPos = lastSpacePos === -1 ? 0 : lastSpacePos + 1;
+
+                const newTextBeforeCursor = currentValue.substring(0, startPos) + tagName;
+                newValue = newTextBeforeCursor + " " + textAfterCursor.trimStart();
+                newCursorPos = newTextBeforeCursor.length + 1;
+            }
 
             textarea.value = newValue;
-
-            const newCursorPos = newTextBeforeCursor.length + (textAfterCursor.trim() !== '' ? 2 : 0);
             textarea.setSelectionRange(newCursorPos, newCursorPos);
             textarea.focus();
+            
+            ['input', 'change'].forEach(eventType => {
+                textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+            });
+            suggestionsContainer.style.display = 'none';
+            currentSuggestions = [];
+            activeIndex = -1;
         };
 
-        let debounceTimer;
-        textarea.addEventListener('input', (e) => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                const cursorPosition = textarea.selectionStart;
-                const textBeforeCursor = textarea.value.substring(0, cursorPosition);
+        const navigateSuggestions = (direction) => {
+            const suggestions = suggestionsContainer.querySelectorAll('.tag-suggestion');
+            if (!suggestions.length) return;
+            
+            if (activeIndex >= 0 && activeIndex < suggestions.length) {
+                suggestions[activeIndex].classList.remove('active');
+            }
 
-                const match = textBeforeCursor.match(/[^,]*$/);
-                if (match) {
-                    const currentTag = match[0].trim();
-                    fetchSuggestions(currentTag);
-                }
-            }, 300);
-        });
+            activeIndex += direction;
+            if (activeIndex < 0) activeIndex = suggestions.length - 1;
+            if (activeIndex >= suggestions.length) activeIndex = 0;
 
-        document.addEventListener('click', (e) => {
+            suggestions[activeIndex].classList.add('active');
+            suggestions[activeIndex].scrollIntoView({ block: 'nearest' });
+        };
+
+        const handleInput = (e) => {
+            const cursorPosition = textarea.selectionStart;
+            const currentValue = textarea.value;
+            let term = '';
+            let termStart = -1;
+            let termEnd = -1;
+
+            if (isCommaSeparated) {
+                termStart = currentValue.lastIndexOf(',', cursorPosition - 1);
+                termStart = termStart === -1 ? 0 : termStart + 1;
+
+                termEnd = currentValue.indexOf(',', cursorPosition);
+                 termEnd = termEnd === -1 ? currentValue.length : termEnd;
+
+                term = currentValue.substring(termStart, termEnd).trim();
+
+                 currentTagSegment = { term: term, start: termStart, end: termEnd };
+            } else {
+                 const textBeforeCursor = currentValue.substring(0, cursorPosition);
+                 const lastSpacePos = textBeforeCursor.lastIndexOf(' ');
+                 termStart = lastSpacePos === -1 ? 0 : lastSpacePos + 1;
+                 term = textBeforeCursor.substring(termStart).trim();
+            }
+
+            fetchSuggestions(term);
+        };
+
+        const handleClickOutside = (e) => {
             if (!suggestionsContainer.contains(e.target) && e.target !== textarea) {
                 suggestionsContainer.style.display = 'none';
             }
-        });
+        };
 
-        textarea.addEventListener('keydown', (e) => {
-            if (!suggestionsContainer.style.display || suggestionsContainer.style.display === 'none') {
-                return;
-            }
-
-            const suggestions = suggestionsContainer.querySelectorAll('.tag-suggestion');
-            const activeIndex = Array.from(suggestions).findIndex(s => s.classList.contains('active'));
+        const handleKeyDown = (e) => {
+            if (suggestionsContainer.style.display !== 'block') return;
 
             switch (e.key) {
                 case 'ArrowDown':
                     e.preventDefault();
-                    navigateSuggestions(suggestions, activeIndex, 1);
+                    navigateSuggestions(1);
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
-                    navigateSuggestions(suggestions, activeIndex, -1);
+                    navigateSuggestions(-1);
                     break;
-                case 'Enter': {
+                case 'Enter': 
+                case 'Tab':
+                 {
+                    if (activeIndex === -1) return;
                     e.preventDefault();
                     const activeElement = suggestionsContainer.querySelector('.tag-suggestion.active');
                     if (activeElement) {
-                        activeElement.click();
+                        const index = parseInt(activeElement.dataset.index, 10);
+                        if (index >= 0 && index < currentSuggestions.length) {
+                            addTagToTextarea(textarea, currentSuggestions[index].name, isCommaSeparated);
+                        }
+                    } else {
+                         suggestionsContainer.style.display = 'none';
                     }
                     break;
                 }
                 case 'Escape':
+                    e.preventDefault();
                     suggestionsContainer.style.display = 'none';
                     break;
             }
-        });
+        };
 
-        const navigateSuggestions = (suggestions, currentIndex, direction) => {
-            if (currentIndex >= 0) {
-                suggestions[currentIndex].classList.remove('active');
+        registerEventListener(textarea, 'input', handleInput);
+        registerEventListener(document, 'click', handleClickOutside);
+        registerEventListener(textarea, 'keydown', handleKeyDown);
+
+        return {
+            destroy: () => {
+                 suggestionsContainer.removeEventListener('click', handleSuggestionClick);
+                 suggestionsContainer.removeEventListener('mouseover', handleSuggestionMouseover);
+                 suggestionsContainer.remove();
             }
-
-            let newIndex = currentIndex + direction;
-            if (newIndex < 0) newIndex = suggestions.length - 1;
-            if (newIndex >= suggestions.length) newIndex = 0;
-
-            suggestions[newIndex].classList.add('active');
-            suggestions[newIndex].scrollIntoView({ block: 'nearest' });
         };
     };
 
-    const showConfigUI = () => {
-        const existingDialog = document.getElementById('e6-autotagger-config');
-        if (existingDialog) {
-            existingDialog.remove();
+    const createThrobber = () => {
+        const throbber = document.createElement('div');
+        throbber.className = 'ai-throbber'; // LMAO
+        throbber.style.cssText = 'display: inline-block; margin-left: 10px; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: ai-spin 1s linear infinite;';
+        
+        const styleAnimation = document.createElement('style');
+        styleAnimation.textContent = '@keyframes ai-spin { to { transform: rotate(360deg); } }';
+        document.head.appendChild(styleAnimation);
+        
+        return throbber;
+    };
+
+    const applyAutoTags = (textarea) => {
+        if (!textarea) {
+            DEBUG.warn('AutoTags', 'No textarea found');
+            return;
+        }
+        
+        const config = state.config || loadConfig();
+        if (!config.autoTags.trim()) {
+            DEBUG.log('AutoTags', 'No auto tags configured, skipping');
+            return;
         }
 
-        const dialog = document.createElement('dialog');
-        dialog.id = 'e6-autotagger-config';
-        dialog.style.cssText = 'padding: 20px; border-radius: 8px; background-color: #2a2a2a; color: #fff; border: 1px solid #666; min-width: 400px; max-width: 600px;';
-
-        const title = document.createElement('h2');
-        title.textContent = 'E6 Autotagger Configuration';
-        title.style.cssText = 'margin-top: 0; text-align: center;';
-
-        const container = document.createElement('div');
-        container.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
-
-        const currentConfig = getConfig();
-        let displayEndpoint = currentConfig.localEndpoint;
-        if (displayEndpoint.endsWith('/api/predict')) {
-            displayEndpoint = displayEndpoint.substring(0, displayEndpoint.length - 12);
+        DEBUG.info('AutoTags', 'Applying auto tags', { autoTags: config.autoTags });
+        
+        const isEditPage = window.location.href.includes('/posts/') && !window.location.href.includes('/uploads/new');
+        if (isEditPage && !config.enableAutoTagOnEdit) {
+            DEBUG.warn('AutoTags', 'Auto tag on edit is disabled, skipping auto tags application');
+            return;
         }
 
-        const endpointLabel = document.createElement('label');
-        endpointLabel.textContent = 'Local AI Endpoint URL:';
+        const formattedAutoTags = config.autoTags
+            .split(',')
+            .map(tag => tag.trim())
+            .map(tag => tag.replace(/\s+/g, '_'))
+            .join(' ');
+        
+        DEBUG.log('AutoTags', 'Formatted auto tags', { formattedAutoTags });
 
-        const endpointInput = document.createElement('input');
-        endpointInput.type = 'text';
-        endpointInput.value = displayEndpoint;
-        endpointInput.style.cssText = 'width: 100%; padding: 8px; background-color: #333; color: #fff; border: 1px solid #666; border-radius: 4px; margin-top: 5px;';
-        endpointInput.placeholder = 'http://127.0.0.1:7860';
+        textarea.value = formatTags(formattedAutoTags, config.preserveExistingTags ? textarea.value : '');
+        DEBUG.info('AutoTags', 'Auto tags applied successfully');
 
-        const endpointContainer = document.createElement('div');
-        endpointContainer.appendChild(endpointLabel);
-        endpointContainer.appendChild(endpointInput);
-
-        const confidenceLabel = document.createElement('label');
-        confidenceLabel.textContent = `Confidence Threshold: ${currentConfig.confidence}`;
-        confidenceLabel.id = 'confidence-label';
-
-        const confidenceInput = document.createElement('input');
-        confidenceInput.type = 'range';
-        confidenceInput.id = 'confidence-slider';
-        confidenceInput.min = '0.1';
-        confidenceInput.max = '1';
-        confidenceInput.step = '0.05';
-        confidenceInput.value = currentConfig.confidence;
-        confidenceInput.style.cssText = 'width: 100%; margin-top: 5px;';
-
-        confidenceInput.addEventListener('input', () => {
-            const value = parseFloat(confidenceInput.value);
-            confidenceLabel.textContent = `Confidence Threshold: ${value}`;
-            updateConfidence(value);
+        ['input', 'change'].forEach(eventType => {
+            textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
         });
-
-        const confidenceContainer = document.createElement('div');
-        confidenceContainer.appendChild(confidenceLabel);
-        confidenceContainer.appendChild(confidenceInput);
-
-        const blacklistLabel = document.createElement('label');
-        blacklistLabel.textContent = 'Tag Blacklist:';
-
-        const blacklistContainer = document.createElement('div');
-        blacklistContainer.style.position = 'relative';
-        blacklistContainer.appendChild(blacklistLabel);
-
-        const blacklistInput = document.createElement('textarea');
-        blacklistInput.value = currentConfig.tagBlacklist;
-        blacklistInput.style.cssText = 'width: 100%; height: 100px; padding: 8px; background-color: #333; color: #fff; border: 1px solid #666; border-radius: 4px; margin-top: 5px;';
-        blacklistInput.placeholder = 'Tags you do not want (comma separated)';
-        blacklistContainer.appendChild(blacklistInput);
-
-        addAutocompleteToTextarea(blacklistInput, blacklistContainer);
-
-        const enableAutoTagOnEditContainer = document.createElement('div');
-        enableAutoTagOnEditContainer.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-top: 5px;';
-
-        const enableAutoTagOnEditInput = document.createElement('input');
-        enableAutoTagOnEditInput.type = 'checkbox';
-        enableAutoTagOnEditInput.checked = currentConfig.enableAutoTagOnEdit;
-        enableAutoTagOnEditInput.style.cssText = 'width: 18px; height: 18px;';
-
-        const enableAutoTagOnEditLabel = document.createElement('label');
-        enableAutoTagOnEditLabel.textContent = 'Enable Auto Tag on post edit';
-        enableAutoTagOnEditLabel.style.marginLeft = '5px';
-
-        enableAutoTagOnEditContainer.appendChild(enableAutoTagOnEditInput);
-        enableAutoTagOnEditContainer.appendChild(enableAutoTagOnEditLabel);
-
-        const autoTagsLabel = document.createElement('label');
-        autoTagsLabel.textContent = 'Auto Tags:';
-
-        const autoTagsContainer = document.createElement('div');
-        autoTagsContainer.style.position = 'relative';
-
-        autoTagsContainer.appendChild(enableAutoTagOnEditContainer);
-        autoTagsContainer.appendChild(document.createElement('br'));
-        autoTagsContainer.appendChild(autoTagsLabel);
-
-        const autoTagsInput = document.createElement('textarea');
-        autoTagsInput.value = currentConfig.autoTags;
-        autoTagsInput.style.cssText = 'width: 100%; height: 100px; padding: 8px; background-color: #333; color: #fff; border: 1px solid #666; border-radius: 4px; margin-top: 5px;';
-        autoTagsInput.placeholder = 'Tags to automatically add (comma separated)';
-        autoTagsContainer.appendChild(autoTagsInput);
-
-        addAutocompleteToTextarea(autoTagsInput, autoTagsContainer);
-
-        const preserveTagsContainer = document.createElement('div');
-        preserveTagsContainer.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-top: 5px;';
-
-        const preserveTagsInput = document.createElement('input');
-        preserveTagsInput.type = 'checkbox';
-        preserveTagsInput.checked = currentConfig.preserveExistingTags;
-        preserveTagsInput.style.cssText = 'width: 18px; height: 18px;';
-
-        const preserveTagsLabel = document.createElement('label');
-        preserveTagsLabel.textContent = 'Preserve existing tags when auto-tagging';
-        preserveTagsLabel.style.marginLeft = '5px';
-
-        preserveTagsContainer.appendChild(preserveTagsInput);
-        preserveTagsContainer.appendChild(preserveTagsLabel);
-
-        const sortAlphabeticallyContainer = document.createElement('div');
-        sortAlphabeticallyContainer.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-top: 5px;';
-
-        const sortAlphabeticallyInput = document.createElement('input');
-        sortAlphabeticallyInput.type = 'checkbox';
-        sortAlphabeticallyInput.checked = currentConfig.sortTagsAlphabetically;
-        sortAlphabeticallyInput.style.cssText = 'width: 18px; height: 18px;';
-
-        const sortAlphabeticallyLabel = document.createElement('label');
-        sortAlphabeticallyLabel.textContent = 'Sort tags alphabetically';
-        sortAlphabeticallyLabel.style.marginLeft = '5px';
-
-        sortAlphabeticallyContainer.appendChild(sortAlphabeticallyInput);
-        sortAlphabeticallyContainer.appendChild(sortAlphabeticallyLabel);
-
-        const sortingModeContainer = document.createElement('div');
-        sortingModeContainer.style.cssText = 'margin-top: 15px;';
-
-        const sortingModeLabel = document.createElement('label');
-        sortingModeLabel.textContent = 'Default Tag Format:';
-        sortingModeContainer.appendChild(sortingModeLabel);
-
-        const sortingModeOptionsContainer = document.createElement('div');
-        sortingModeOptionsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-top: 5px;';
-
-        const flatModeContainer = document.createElement('div');
-        flatModeContainer.style.cssText = 'display: flex; align-items: center;';
-
-        const flatModeInput = document.createElement('input');
-        flatModeInput.type = 'radio';
-        flatModeInput.name = 'sortingMode';
-        flatModeInput.value = 'flat';
-        flatModeInput.checked = currentConfig.sortingMode === 'flat';
-        flatModeInput.style.marginRight = '5px';
-
-        const flatModeLabel = document.createElement('label');
-        flatModeLabel.textContent = 'Flat (all tags in a single line)';
-
-        flatModeContainer.appendChild(flatModeInput);
-        flatModeContainer.appendChild(flatModeLabel);
-
-        const onePerLineContainer = document.createElement('div');
-        onePerLineContainer.style.cssText = 'display: flex; align-items: center;';
-
-        const onePerLineInput = document.createElement('input');
-        onePerLineInput.type = 'radio';
-        onePerLineInput.name = 'sortingMode';
-        onePerLineInput.value = 'oneperline';
-        onePerLineInput.checked = currentConfig.sortingMode === 'oneperline';
-        onePerLineInput.style.marginRight = '5px';
-
-        const onePerLineLabel = document.createElement('label');
-        onePerLineLabel.textContent = 'One Per Line (each tag on a separate line)';
-
-        onePerLineContainer.appendChild(onePerLineInput);
-        onePerLineContainer.appendChild(onePerLineLabel);
-
-        const groupedModeContainer = document.createElement('div');
-        groupedModeContainer.style.cssText = 'display: flex; align-items: center;';
-
-        const groupedModeInput = document.createElement('input');
-        groupedModeInput.type = 'radio';
-        groupedModeInput.name = 'sortingMode';
-        groupedModeInput.value = 'grouped';
-        groupedModeInput.checked = currentConfig.sortingMode === 'grouped';
-        groupedModeInput.style.marginRight = '5px';
-
-        const groupedModeLabel = document.createElement('label');
-        groupedModeLabel.textContent = 'Grouped (tags organized by first letter)';
-
-        groupedModeContainer.appendChild(groupedModeInput);
-        groupedModeContainer.appendChild(groupedModeLabel);
-
-        sortingModeOptionsContainer.appendChild(flatModeContainer);
-        sortingModeOptionsContainer.appendChild(onePerLineContainer);
-        sortingModeOptionsContainer.appendChild(groupedModeContainer);
-
-        sortingModeContainer.appendChild(sortingModeOptionsContainer);
-
-        const buttonContainer = document.createElement('div');
-        buttonContainer.style.cssText = 'display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;';
-
-        const cancelButton = document.createElement('button');
-        cancelButton.textContent = 'Cancel';
-        cancelButton.style.cssText = 'padding: 8px 16px; border: none; border-radius: 4px; background-color: #555; color: #fff; cursor: pointer;';
-
-        const saveButton = document.createElement('button');
-        saveButton.textContent = 'Save';
-        saveButton.style.cssText = 'padding: 8px 16px; border: none; border-radius: 4px; background-color: #4a6; color: #fff; cursor: pointer;';
-
-        buttonContainer.appendChild(cancelButton);
-        buttonContainer.appendChild(saveButton);
-
-        const statusMessage = document.createElement('div');
-        statusMessage.style.cssText = 'margin-top: 10px; padding: 8px; border-radius: 4px; text-align: center; display: none;';
-
-        container.appendChild(endpointContainer);
-        container.appendChild(confidenceContainer);
-        container.appendChild(blacklistContainer);
-        container.appendChild(autoTagsContainer);
-        container.appendChild(preserveTagsContainer);
-        container.appendChild(sortAlphabeticallyContainer);
-        container.appendChild(sortingModeContainer);
-
-        dialog.appendChild(title);
-        dialog.appendChild(container);
-        dialog.appendChild(buttonContainer);
-        dialog.appendChild(statusMessage);
-
-        document.body.appendChild(dialog);
-        dialog.showModal();
-
-        const showStatus = (message, isError = false) => {
-            console.log("Status message:", message, "isError:", isError);
-            statusMessage.textContent = message;
-            statusMessage.style.display = 'block';
-            statusMessage.style.backgroundColor = isError ? '#a33' : '#3a6';
-            statusMessage.style.color = '#fff';
-        };
-
-        const saveSettings = () => {
-            try {
-                let endpoint = endpointInput.value.trim();
-                const confidence = parseFloat(confidenceInput.value);
-                const blacklist = blacklistInput.value.trim();
-                const autoTags = autoTagsInput.value.trim();
-                const preserveExisting = preserveTagsInput.checked;
-                const sortAlphabetically = sortAlphabeticallyInput.checked;
-                const enableAutoTagOnEdit = enableAutoTagOnEditInput.checked;
-                const sortingMode = document.querySelector('input[name="sortingMode"]:checked').value;
-
-                console.log("Saving settings:", {
-                    endpoint,
-                    confidence,
-                    blacklist,
-                    autoTags,
-                    preserveExisting,
-                    sortAlphabetically,
-                    enableAutoTagOnEdit,
-                    sortingMode
-                });
-
-                if (!endpoint) {
-                    showStatus('Endpoint URL cannot be empty', true);
-                    return false;
-                }
-
-                if (!endpoint.endsWith('/api/predict')) {
-                    endpoint = endpoint.replace(/\/$/, '') + '/api/predict';
-                }
-
-                GM_setValue('localEndpoint', endpoint);
-                GM_setValue('confidence', confidence);
-                GM_setValue('tagBlacklist', blacklist);
-                GM_setValue('autoTags', autoTags);
-                GM_setValue('preserveExistingTags', preserveExisting);
-                GM_setValue('sortTagsAlphabetically', sortAlphabetically);
-                GM_setValue('enableAutoTagOnEdit', enableAutoTagOnEdit);
-                GM_setValue('sortingMode', sortingMode);
-
-                console.log("Settings saved successfully");
-
-                checkConnection();
-
-                const textarea = getTagTextarea();
-                if (textarea && autoTags) {
-                    applyAutoTags(textarea);
-                }
-
-                return true;
-            } catch (error) {
-                console.error("Error saving settings:", error);
-                showStatus('Error: ' + error.message, true);
-                return false;
-            }
-        };
-
-        saveButton.onclick = () => {
-            const saved = saveSettings();
-            if (saved) {
-                showStatus('Settings saved successfully!');
-
-                saveButton.textContent = 'Close';
-                saveButton.onclick = () => {
-                    dialog.remove();
-                };
-            }
-        };
-
-        cancelButton.onclick = () => {
-            dialog.remove();
-        };
     };
 
     const getTagTextarea = () => {
-        let textarea = document.getElementById("post_tags");
+        return getElement(SELECTORS.tagTextarea) || getElement(SELECTORS.editTagTextarea);
+    };  
 
-        if (!textarea) {
-            textarea = document.getElementById("post_tag_string");
-        }
+    const updateConfidence = value => {
+        value = Math.max(0.1, Math.min(1, parseFloat(value) || 0.25));
+        DEBUG.log('Confidence Update', 'Attempting to save confidence:', value);
+        
+        saveConfig({ confidence: value });
+        DEBUG.log('Confidence Update', 'Current state.config.confidence after save:', state.config.confidence);
 
-        if (!textarea) {
-            textarea = document.querySelector("textarea.tag-textarea[name='post[tag_string]']");
-        }
+        const input = getElement(SELECTORS.confidenceInput);
+        if (input) input.value = value.toFixed(2);
 
-        if (!textarea) {
-            textarea = document.querySelector("textarea[name='post[tag_string]']");
-        }
+        const configSlider = document.getElementById('confidence-slider');
+        if (configSlider) configSlider.value = value;
+
+        const configLabel = document.getElementById('confidence-label');
+        if (configLabel) configLabel.textContent = `Confidence Threshold: ${value}`;
+    };
+
+    const addControls = () => {
+        const textarea = getTagTextarea();
+        if (!textarea) return null;
+
+        if (getElement(SELECTORS.button)) return textarea;
+
+        const textareaContainer = textarea.parentElement;
+        if (!textareaContainer) return null;
+
+        const controlsContainer = document.createElement('div');
+        controlsContainer.className = 'ai-controls-container';
+        controlsContainer.style.cssText = 'display: flex; align-items: center; margin-bottom: 10px;';
+        textareaContainer.insertBefore(controlsContainer, textarea);
+
+        const button = document.createElement('button');
+        button.className = 'ai-tag-button';
+        button.textContent = 'Connect';
+        controlsContainer.appendChild(button);
+
+        const warningText = document.createElement('span');
+        warningText.className = 'ai-warning-text';
+        warningText.textContent = '⚠️ Not connected to AI endpoint';
+        warningText.style.cssText = 'margin-left: 10px; font-size: 12px; color: red;';
+        controlsContainer.appendChild(warningText);
+
+        const confidenceContainer = document.createElement('div');
+        confidenceContainer.style.cssText = 'margin-left: auto; display: flex; align-items: center;';
+        controlsContainer.appendChild(confidenceContainer);
+
+        const confidenceLabel = document.createElement('label');
+        confidenceLabel.textContent = 'Confidence:';
+        confidenceLabel.style.cssText = 'font-size: 12px; margin-right: 5px;';
+        confidenceContainer.appendChild(confidenceLabel);
+
+        const confidenceInput = document.createElement('input');
+        confidenceInput.type = 'number';
+        confidenceInput.className = 'ai-confidence-input';
+        confidenceInput.min = '0.1';
+        confidenceInput.max = '1';
+        confidenceInput.step = '0.05';
+        confidenceInput.value = (state.config || loadConfig()).confidence;
+        confidenceInput.style.cssText = 'width: 60px; font-size: 12px; padding: 2px 5px; background-color: #ffffff; color: #000000; border: 1px solid #666; border-radius: 3px;';
+        confidenceContainer.appendChild(confidenceInput);
+
+        const sortButton = document.createElement('button');
+        sortButton.className = 'ai-sort-button';
+        sortButton.textContent = 'Sort';
+        sortButton.type = 'button';
+        sortButton.style.cssText = 'margin-left: 10px; font-size: 14px; padding: 3px 10px; background-color: #ffffff; color: #000000; border: 1px solid #666; border-radius: 3px;';
+        controlsContainer.appendChild(sortButton);
+
+        registerEventListener(button, 'click', async () => {
+            if (button.textContent === 'Connect') {
+                try {
+                    button.disabled = true;
+                    button.style.opacity = '0.5';
+                    button.textContent = 'Connecting...';
+                    await checkConnection(true);
+                } catch (error) {
+                    alert(`Failed to connect: ${error.message}`);
+                    setConnectionState(false);
+                } finally {
+                    button.disabled = false;
+                    button.style.opacity = '1';
+                }
+            } else {
+                const throbber = createThrobber();
+                processImage(button, textarea, throbber);
+            }
+        });
+
+        registerEventListener(confidenceInput, 'change', () => {
+            updateConfidence(confidenceInput.value);
+        });
+
+        registerEventListener(sortButton, 'click', () => {
+            if (!textarea.value.trim()) return;
+            
+            const config = state.config || loadConfig();
+            textarea.value = formatTags(textarea.value.replace(/\s+/g, ','));
+            
+            ['input', 'change'].forEach(eventType => {
+                textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+            });
+        });
+
+        addAutocompleteToTextarea(textarea, textareaContainer);
+
+        setTimeout(() => applyAutoTags(textarea), 500);
 
         return textarea;
     };
 
-    const addControls = () => {
-        let textarea = getTagTextarea();
-        if (!textarea) {
-            return;
+    const showConfigUI = () => {
+        DEBUG.log('Config', 'Opening configuration dialog');
+        const existingDialog = document.getElementById('e6-autotagger-config');
+        if (existingDialog) {
+            DEBUG.log('Config', 'Removing existing dialog');
+            existingDialog.remove();
         }
 
-        if (document.querySelector('.ai-tag-button')) {
-            return;
+        const config = state.config || loadConfig();
+        DEBUG.log('Config', 'Current configuration', config);
+
+        const dialog = document.createElement('dialog');
+        dialog.id = 'e6-autotagger-config';
+        document.body.appendChild(dialog);
+
+        const form = document.createElement('form');
+        form.method = 'dialog';
+        dialog.appendChild(form);
+
+        const title = document.createElement('h2');
+        title.textContent = 'E6 Autotagger Configuration';
+        title.style.marginTop = '0';
+        form.appendChild(title);
+
+        addConfigInput(form, 'localEndpoint', 'AI Endpoint URL', config.localEndpoint, 'text', 
+            'Enter the URL of your local AI endpoint (without /api/predict)');
+
+        const confidenceContainer = document.createElement('div');
+        confidenceContainer.className = 'config-row';
+        form.appendChild(confidenceContainer);
+
+        const confidenceLabel = document.createElement('label');
+        confidenceLabel.id = 'confidence-label';
+        confidenceLabel.textContent = `Confidence Threshold: ${config.confidence}`;
+        confidenceContainer.appendChild(confidenceLabel);
+
+        const confidenceSlider = document.createElement('input');
+        confidenceSlider.type = 'range';
+        confidenceSlider.id = 'confidence-slider';
+        confidenceSlider.min = '0.1';
+        confidenceSlider.max = '1';
+        confidenceSlider.step = '0.05';
+        confidenceSlider.value = config.confidence;
+        confidenceSlider.className = 'config-input';
+        confidenceSlider.addEventListener('input', () => {
+            confidenceLabel.textContent = `Confidence Threshold: ${confidenceSlider.value}`;
+        });
+        confidenceContainer.appendChild(confidenceSlider);
+
+        addConfigInput(form, 'requestTimeout', 'Request Timeout (ms)', config.requestTimeout, 'number', 
+            'Maximum time to wait for API response in milliseconds');
+
+        addConfigInput(form, 'maxRetries', 'Max Retries', config.maxRetries, 'number', 
+            'Number of times to retry failed requests');
+
+        const blacklistContainer = document.createElement('div');
+        blacklistContainer.className = 'config-row';
+        form.appendChild(blacklistContainer);
+        const blacklistTextarea = addConfigInput(blacklistContainer, 'tagBlacklist', 'Tag Blacklist', config.tagBlacklist, 'textarea', 
+            'Comma-separated list of tags to exclude');
+        addAutocompleteToTextarea(blacklistTextarea, blacklistContainer, true);
+
+        const autoTagsContainer = document.createElement('div');
+        autoTagsContainer.className = 'config-row';
+        form.appendChild(autoTagsContainer);
+        const autoTagsTextarea = addConfigInput(autoTagsContainer, 'autoTags', 'Auto Tags', config.autoTags, 'textarea', 
+            'Comma-separated list of tags to add automatically');
+        addAutocompleteToTextarea(autoTagsTextarea, autoTagsContainer, true);
+
+        addConfigCheckbox(form, 'preserveExistingTags', 'Preserve Existing Tags', config.preserveExistingTags, 
+            'Keep existing tags when generating new ones');
+
+        addConfigCheckbox(form, 'enableAutoTagOnEdit', 'Enable Auto Tags on Edit', config.enableAutoTagOnEdit, 
+            'Apply auto tags when editing existing posts');
+
+        const sortingContainer = document.createElement('div');
+        sortingContainer.className = 'config-row';
+        form.appendChild(sortingContainer);
+
+        const sortingLabel = document.createElement('label');
+        sortingLabel.textContent = 'Tag Sorting Mode';
+        sortingContainer.appendChild(sortingLabel);
+
+        const sortingSelect = document.createElement('select');
+        sortingSelect.className = 'config-input';
+        sortingSelect.name = 'sortingMode';
+        
+        const sortingModes = [
+            { value: 'flat', label: 'Flat (space-separated)' },
+            { value: 'grouped', label: 'Grouped (by first letter)' },
+            { value: 'oneperline', label: 'One tag per line' }
+        ];
+        
+        sortingModes.forEach(mode => {
+            const option = document.createElement('option');
+            option.value = mode.value;
+            option.textContent = mode.label;
+            option.selected = config.sortingMode === mode.value;
+            sortingSelect.appendChild(option);
+        });
+        
+        sortingContainer.appendChild(sortingSelect);
+
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.style.cssText = 'display: flex; justify-content: space-between; margin-top: 20px;';
+        form.appendChild(buttonsContainer);
+
+        const testButton = document.createElement('button');
+        testButton.textContent = 'Test Connection';
+        testButton.type = 'button';
+        testButton.style.cssText = 'padding: 8px 16px; background-color: #ffffff; color: #000000; border: 1px solid #666; border-radius: 4px; cursor: pointer;';
+        buttonsContainer.appendChild(testButton);
+
+        const buttonGroup = document.createElement('div');
+        buttonsContainer.appendChild(buttonGroup);
+
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.type = 'button';
+        cancelButton.style.cssText = 'padding: 8px 16px; background-color: #ffffff; color: #000000; border: 1px solid #666; border-radius: 4px; cursor: pointer; margin-right: 10px;';
+        buttonGroup.appendChild(cancelButton);
+
+        const saveButton = document.createElement('button');
+        saveButton.textContent = 'Save';
+        saveButton.type = 'button';
+        saveButton.style.cssText = 'padding: 8px 16px; background-color: #ffffff; color: #000000; border: 1px solid #666; border-radius: 4px; cursor: pointer;';
+        buttonGroup.appendChild(saveButton);
+
+        const statusArea = document.createElement('div');
+        statusArea.className = 'config-status';
+        statusArea.style.display = 'none';
+        form.appendChild(statusArea);
+
+        function addConfigInput(parent, name, label, value, type, placeholder) {
+            const labelElem = document.createElement('label');
+            labelElem.textContent = label;
+            parent.appendChild(labelElem);
+
+            const input = document.createElement(type === 'textarea' ? 'textarea' : 'input');
+            if (type !== 'textarea') input.type = type;
+            input.className = 'config-input';
+            input.name = name;
+            input.value = value;
+            input.placeholder = placeholder;
+            if (type === 'textarea') input.rows = 3;
+            parent.appendChild(input);
+
+            return input;
         }
 
-        const config = getConfig();
+        function addConfigCheckbox(parent, name, label, checked, description) {
+            const container = document.createElement('div');
+            container.className = 'config-row';
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            parent.appendChild(container);
 
-        const controlsContainer = document.createElement("div");
-        controlsContainer.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 10px;";
-        controlsContainer.classList.add('ai-controls-container');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.name = name;
+            checkbox.checked = checked;
+            checkbox.style.marginRight = '10px';
+            container.appendChild(checkbox);
 
-        const generateButton = document.createElement("button");
-        generateButton.textContent = "Connect";
-        generateButton.classList.add("toggle-button", "ai-tag-button");
-        generateButton.title = "Using Local JTP Pilot²";
+            const labelElem = document.createElement('label');
+            labelElem.textContent = label;
+            container.appendChild(labelElem);
 
-        const sortButton = document.createElement("button");
-        sortButton.textContent = "Sort Tags";
-        sortButton.classList.add("toggle-button", "sort-tags-button");
-        sortButton.title = "Sort tags according to your preferred format";
-        sortButton.style.cssText = "margin-left: 5px;";
+            if (description) {
+                const descElem = document.createElement('span');
+                descElem.textContent = ` - ${description}`;
+                descElem.style.fontSize = '12px';
+                descElem.style.opacity = '0.8';
+                container.appendChild(descElem);
+            }
 
-        const confidenceContainer = document.createElement("div");
-        confidenceContainer.style.cssText = "display: flex; align-items: center;";
+            return checkbox;
+        }
 
-        const confidenceLabel = document.createElement("label");
-        confidenceLabel.textContent = "Confidence:";
-        confidenceLabel.style.marginRight = "5px";
+        const showStatus = (message, isError = false) => {
+            statusArea.textContent = message;
+            statusArea.style.backgroundColor = isError ? '#ff3333' : '#4caf50';
+            statusArea.style.color = 'white';
+            statusArea.style.display = 'block';
+            
+            setTimeout(() => {
+                statusArea.style.display = 'none';
+            }, 3000);
+        };
 
-        const confidenceInput = document.createElement("input");
-        confidenceInput.type = "number";
-        confidenceInput.step = "0.05";
-        confidenceInput.min = "0.1";
-        confidenceInput.max = "1";
-        confidenceInput.classList.add("ai-confidence-input");
-        confidenceInput.value = getConfig().confidence.toFixed(2);
-        confidenceInput.style.width = "60px";
-        confidenceInput.addEventListener("change", e => {
-            const newValue = parseFloat(e.target.value);
-            updateConfidence(newValue);
-
-            generateButton.disabled = false;
-            generateButton.style.opacity = "1";
+        registerEventListener(testButton, 'click', async () => {
+            testButton.disabled = true;
+            
+            try {
+                const endpointInput = form.querySelector('input[name="localEndpoint"]');
+                const endpoint = endpointInput.value.trim();
+                
+                if (!endpoint) {
+                    throw new Error('Endpoint URL is required');
+                }
+                
+                const originalEndpoint = config.localEndpoint;
+                const formattedEndpoint = endpoint.endsWith('/api/predict') ? 
+                    endpoint : endpoint.replace(/\/$/, '') + '/api/predict';
+                
+                state.config = { ...config, localEndpoint: formattedEndpoint };
+                
+                await checkConnection(false);
+                showStatus('Connection successful!');
+                
+                state.config = { ...config, localEndpoint: originalEndpoint };
+            } catch (error) {
+                showStatus(`Connection failed: ${error.message}`, true);
+            } finally {
+                testButton.disabled = false;
+            }
         });
 
-        const warningText = document.createElement("span");
-        warningText.classList.add("ai-warning-text");
-        warningText.textContent = "⚠️ Not connected to JTP Pilot";
-        warningText.style.color = "red";
-
-        confidenceContainer.appendChild(confidenceLabel);
-        confidenceContainer.appendChild(confidenceInput);
-
-        const sortTagsAlphabetically = () => {
-            if (!textarea || !textarea.value.trim()) return;
-
-            const config = getConfig();
-            const tags = textarea.value.trim().split(/[\s\n]+/);
-            tags.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-
-            if (config.sortingMode === 'grouped') {
-                const groupedTags = {};
-
-                tags.forEach(tag => {
-                    const firstLetter = tag.charAt(0).toLowerCase();
-                    if (!groupedTags[firstLetter]) {
-                        groupedTags[firstLetter] = [];
+        registerEventListener(saveButton, 'click', () => {
+            try {
+                DEBUG.log('Config', 'Saving configuration');
+                const newConfig = {
+                    localEndpoint: form.querySelector('[name="localEndpoint"]').value.trim(),
+                    confidence: parseFloat(form.querySelector('#confidence-slider').value),
+                    tagBlacklist: form.querySelector('[name="tagBlacklist"]').value.trim(),
+                    autoTags: form.querySelector('[name="autoTags"]').value.trim(),
+                    preserveExistingTags: form.querySelector('[name="preserveExistingTags"]').checked,
+                    enableAutoTagOnEdit: form.querySelector('[name="enableAutoTagOnEdit"]').checked,
+                    sortingMode: form.querySelector('[name="sortingMode"]').value,
+                    requestTimeout: parseInt(form.querySelector('[name="requestTimeout"]').value) || DEFAULT_CONFIG.requestTimeout,
+                    maxRetries: parseInt(form.querySelector('[name="maxRetries"]').value) || DEFAULT_CONFIG.maxRetries
+                };
+                
+                saveConfig(newConfig);
+                DEBUG.info('Config', 'Configuration saved successfully');
+                
+                const confidenceInput = getElement(SELECTORS.confidenceInput);
+                if (confidenceInput) confidenceInput.value = newConfig.confidence;
+                
+                setTimeout(() => {
+                    try {
+                        checkConnection().catch(err => {
+                            DEBUG.error('Config', 'Connection check failed after saving settings', err);
+                        });
+                    } catch (err) {
+                        DEBUG.error('Config', 'Error during connection check', err);
                     }
-                    groupedTags[firstLetter].push(tag);
-                });
-
-                const rows = Object.keys(groupedTags).sort().map(letter =>
-                                                                 groupedTags[letter].join(' ')
-                                                                );
-
-                textarea.value = rows.join('\n');
-            } else if (config.sortingMode === 'oneperline') {
-                textarea.value = tags.join('\n');
-            } else {
-                textarea.value = tags.join(' ');
+                }, 0);
+                
+                showStatus('Settings saved successfully!');
+            } catch (error) {
+                DEBUG.error('Config', 'Error saving settings', error);
+                console.error('Error saving settings:', error);
+                showStatus(`Error saving settings: ${error.message}`, true);
             }
+        });
 
-            ['input', 'change'].forEach(eventType => {
-                const event = new Event(eventType, { bubbles: false, cancelable: true });
-                textarea.dispatchEvent(event);
-            });
+        registerEventListener(cancelButton, 'click', () => {
+            dialog.close();
+        });
 
-            textarea.focus();
-
-            return false;
-        };
-
-        sortButton.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            sortTagsAlphabetically();
-            return false;
-        };
-
-        generateButton.onclick = () => {
-            if (generateButton.textContent === "Connect") {
-                checkConnection();
-            } else {
-                const throbber = document.createElement("div");
-                throbber.textContent = "⏳ Processing...";
-                throbber.style.cssText = "position: absolute; background: rgba(0, 0, 0, 0.5); color: white; padding: 2vh; border-radius: 1vh; z-index: 1000; margin-top: 1%; margin-left: 15%;";
-                processImage(generateButton, textarea, throbber);
+        registerEventListener(dialog, 'click', (e) => {
+            if (e.target === dialog) {
+                dialog.close();
             }
-        };
+        });
 
-        controlsContainer.appendChild(generateButton);
-        controlsContainer.appendChild(sortButton);
-        controlsContainer.appendChild(confidenceContainer);
-        controlsContainer.appendChild(warningText);
-
-        if (textarea.id === "post_tag_string") {
-            const tagsContainer = document.getElementById("tags-container");
-
-            if (tagsContainer) {
-                const headerElement = tagsContainer.querySelector(".header");
-                if (headerElement) {
-                    headerElement.parentNode.insertBefore(controlsContainer, headerElement.nextSibling);
-                } else {
-                    const tagStringEditor = document.getElementById("tag-string-editor");
-                    if (tagStringEditor) {
-                        tagsContainer.insertBefore(controlsContainer, tagStringEditor);
-                    } else {
-                        tagsContainer.insertBefore(controlsContainer, tagsContainer.firstChild);
-                    }
-                }
-            } else {
-                const textareaParent = textarea.closest("div");
-                if (textareaParent && textareaParent.parentNode) {
-                    textareaParent.parentNode.insertBefore(controlsContainer, textareaParent);
-                } else {
-                    textarea.parentElement.insertBefore(controlsContainer, textarea);
-                }
-            }
-        } else {
-            textarea.parentElement.insertBefore(controlsContainer, textarea);
-        }
-
-        if (connectionCheckInterval) {
-            clearInterval(connectionCheckInterval);
-        }
-        connectionCheckInterval = setInterval(checkConnection, 5000);
-
-        checkConnection();
-        applyAutoTags(textarea);
+        dialog.showModal();
     };
-
-    const initializedPages = new Set();
-    let isWatchingEditButton = false;
-
-    const init = () => {
-        console.log("E6 Autotagger initializing...");
-
-        if (document.querySelector('.ai-controls-container')) {
-            console.log("Controls already added, skipping initialization");
-            return;
-        }
-
-        const textarea = getTagTextarea();
-        if (!textarea) {
-            console.log("No tag textarea found, initialization failed");
-            return;
-        }
-
-        console.log("Found textarea, adding controls");
-        addControls();
-        setTimeout(checkConnection, 100);
-
-        initializedPages.add(window.location.href);
-    };
-
-    GM_registerMenuCommand('Configure Local Tagger Endpoint', showConfigUI);
-
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-        setTimeout(init, 1);
-    } else {
-        document.addEventListener("DOMContentLoaded", init);
-        window.addEventListener("load", init);
-    }
-
 
     const checkForEditPage = () => {
         const currentUrl = window.location.href;
@@ -1016,9 +1399,9 @@
         if (currentUrl.includes('/posts/') && !currentUrl.includes('/uploads/new')) {
             const tagTextarea = getTagTextarea();
             if (tagTextarea) {
-                if (!initializedPages.has(currentUrl)) {
+                if (!state.initializedPages.has(currentUrl)) {
                     console.log("Detected edit page with tag textarea, initializing...");
-                    initializedPages.add(currentUrl);
+                    state.initializedPages.add(currentUrl);
                     init();
                 }
                 return;
@@ -1029,9 +1412,9 @@
 
             const editButtons = [sideEditButton, postEditButton].filter(button => button !== null);
 
-            if (editButtons.length > 0 && !isWatchingEditButton) {
+            if (editButtons.length > 0 && !state.isWatchingEditButton) {
                 console.log("Found edit buttons, watching for clicks...");
-                isWatchingEditButton = true;
+                state.isWatchingEditButton = true;
 
                 const handleEditAction = () => {
                     console.log("Edit action triggered, waiting for tag textarea...");
@@ -1040,27 +1423,27 @@
                         const textarea = getTagTextarea();
                         if (textarea) {
                             console.log("Tag textarea found immediately after edit action");
-                            if (!initializedPages.has(currentUrl)) {
-                                initializedPages.add(currentUrl);
+                            if (!state.initializedPages.has(currentUrl)) {
+                                state.initializedPages.add(currentUrl);
                                 init();
                             }
                             return;
                         }
 
-                        const observer = new MutationObserver((mutations, obs) => {
+                        const observer = registerObserver(new MutationObserver((mutations, obs) => {
                             const tagTextarea = getTagTextarea();
                             if (tagTextarea) {
                                 console.log("Tag textarea appeared after edit action");
                                 obs.disconnect();
 
                                 setTimeout(() => {
-                                    if (!initializedPages.has(currentUrl)) {
-                                        initializedPages.add(currentUrl);
+                                    if (!state.initializedPages.has(currentUrl)) {
+                                        state.initializedPages.add(currentUrl);
                                         init();
                                     }
                                 }, 300);
                             }
-                        });
+                        }));
 
                         observer.observe(document.body, {
                             childList: true,
@@ -1076,18 +1459,16 @@
                 };
 
                 editButtons.forEach(button => {
-                    button.addEventListener('click', handleEditAction);
+                    registerEventListener(button, 'click', handleEditAction);
                 });
 
-                if (currentUrl.includes('/posts/')) {
-                    document.addEventListener('keydown', (e) => {
-                        if (e.key === 'e' &&
-                            !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) &&
-                            !e.ctrlKey && !e.altKey && !e.metaKey) {
-                            handleEditAction();
-                        }
-                    });
-                }
+                registerEventListener(document, 'keydown', (e) => {
+                    if (e.key === 'e' &&
+                        !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) &&
+                        !e.ctrlKey && !e.altKey && !e.metaKey) {
+                        handleEditAction();
+                    }
+                });
             }
         }
     };
@@ -1097,33 +1478,55 @@
 
         console.log("Setting up URL change monitor");
 
-        const observer = new MutationObserver(() => {
+        const observer = registerObserver(new MutationObserver(() => {
             if (location.href !== lastUrl) {
                 console.log("URL changed from", lastUrl, "to", location.href);
                 lastUrl = location.href;
 
-                if (connectionCheckInterval) {
-                    clearInterval(connectionCheckInterval);
-                    connectionCheckInterval = null;
-                }
-
-                initializedPages.clear();
-                isWatchingEditButton = false;
+                clearResources();
+                state.initializedPages.clear();
+                state.isWatchingEditButton = false;
 
                 setTimeout(() => {
                     checkForEditPage();
                 }, 500);
             }
-        });
+        }));
 
         observer.observe(document, {subtree: true, childList: true});
     };
 
-    document.addEventListener("DOMContentLoaded", () => {
+    const init = () => {
+        DEBUG.info('Init', 'Initializing E6 Autotagger');
+        loadConfig();
+        addStyles();
+        
+        const textarea = addControls();
+        if (textarea) {
+            DEBUG.log('Init', 'Found tag textarea, adding controls');
+            startConnectionCheck();
+            state.initializedPages.add(window.location.href);
+            DEBUG.info('Init', 'E6 Autotagger initialized successfully', { url: window.location.href });
+        } else {
+            DEBUG.log("Init", "No tag textarea found, may be on a view-only page");
+            checkForEditPage();
+        }
+    };
+
+    GM_registerMenuCommand('Configure E6 Autotagger', showConfigUI);
+
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+        setTimeout(init, 1);
+    } else {
+        registerEventListener(document, "DOMContentLoaded", init);
+        registerEventListener(window, "load", init);
+    }
+
+    registerEventListener(document, "DOMContentLoaded", () => {
         setTimeout(checkForEditPage, 500);
     });
 
-    window.addEventListener("load", () => {
+    registerEventListener(window, "load", () => {
         setTimeout(checkForEditPage, 500);
         handleUrlChange();
     });
