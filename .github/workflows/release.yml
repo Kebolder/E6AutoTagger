@@ -55,21 +55,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Rename file to E6AutoTagger.js
+        run: |
+          JS_FILE="${{ steps.get_version.outputs.js_file }}"
+          cp "$JS_FILE" "E6AutoTagger.js"
+          echo "Renamed $JS_FILE to E6AutoTagger.js"
+
       - name: Create or Update Release
         run: |
           VERSION="v${{ steps.get_version.outputs.version }}"
-          JS_FILE="${{ steps.get_version.outputs.js_file }}"
-          JS_FILENAME="${{ steps.get_version.outputs.js_filename }}"
 
           # Extract changelog/description from recent commits (last 5 commits)
           DESCRIPTION=$(git log -5 --pretty=format:"- %s" | head -c 500)
 
           if [ "${{ steps.check_release.outputs.exists }}" == "true" ]; then
-            echo "Updating existing release $VERSION"
-            gh release upload "$VERSION" "$JS_FILE" --clobber
-          else
-            echo "Creating new release $VERSION"
-            gh release create "$VERSION" "$JS_FILE" \
+            echo "Updating existing release $VERSION - removing old assets"
+            # Delete the release to remove old assets
+            gh release delete "$VERSION" --yes
+            echo "Creating new release $VERSION with updated file"
+            gh release create "$VERSION" "E6AutoTagger.js" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 
@@ -78,7 +82,23 @@ jobs:
           ## Installation
 
           1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
-          2. Download the \`$JS_FILENAME\` file
+          2. Download the \`E6AutoTagger.js\` file
+          3. Drag and drop the file into Tampermonkey dashboard
+          4. Configure the AI endpoint in the script settings
+
+          **Note**: Requires JTP Pilot (Gradio 3) - see README.md for setup instructions."
+          else
+            echo "Creating new release $VERSION"
+            gh release create "$VERSION" "E6AutoTagger.js" \
+              --title "E6AutoTagger $VERSION" \
+              --notes "## Changes
+
+          $DESCRIPTION
+
+          ## Installation
+
+          1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
+          2. Download the \`E6AutoTagger.js\` file
           3. Drag and drop the file into Tampermonkey dashboard
           4. Configure the AI endpoint in the script settings
 
