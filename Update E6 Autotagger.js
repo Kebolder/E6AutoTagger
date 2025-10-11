@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         E6 Autotagger 2.3.4
-// @version      2.3.4
+// @name         E6 Autotagger
+// @version      2.3.6
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
-// @match        https://e621.net/uploads/new
-// @match        https://e926.net/uploads/new
-// @match        https://e6ai.net/uploads/new
+// @match        https://e621.net/uploads/new*
+// @match        https://e926.net/uploads/new*
+// @match        https://e6ai.net/uploads/new*
 // @match        https://e621.net/posts/*
 // @match        https://e926.net/posts/*
 // @match        https://e6ai.net/posts/*
@@ -316,67 +316,38 @@
                 return window.getComputedStyle(element).backgroundColor;
             };
 
-            const isColorDark = (color) => {
+            const parseColor = (color) => {
                 try {
-                    let r, g, b;
-
                     if (color.startsWith('#')) {
                         const hex = color.substring(1);
-                        r = parseInt(hex.substr(0, 2), 16);
-                        g = parseInt(hex.substr(2, 2), 16);
-                        b = parseInt(hex.substr(4, 2), 16);
+                        return [
+                            parseInt(hex.substr(0, 2), 16),
+                            parseInt(hex.substr(2, 2), 16),
+                            parseInt(hex.substr(4, 2), 16)
+                        ];
                     } else if (color.startsWith('rgb')) {
                         const rgbValues = color.match(/\d+/g);
-                        if (rgbValues && rgbValues.length >= 3) {
-                            r = parseInt(rgbValues[0]);
-                            g = parseInt(rgbValues[1]);
-                            b = parseInt(rgbValues[2]);
-                        } else {
-                            return true;
-                        }
-                    } else {
-                        return true;
+                        return rgbValues && rgbValues.length >= 3
+                            ? rgbValues.slice(0, 3).map(v => parseInt(v))
+                            : null;
                     }
-
-                    const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
-                    return brightness < 0.5;
+                    return null;
                 } catch (e) {
-                    console.error('Error checking color brightness:', e);
-                    return true;
+                    return null;
                 }
             };
 
+            const isColorDark = (color) => {
+                const rgb = parseColor(color);
+                if (!rgb) return true;
+                const brightness = (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255;
+                return brightness < 0.5;
+            };
+
             const adjustBrightness = (color, percent) => {
-                try {
-                    let r, g, b;
-
-                    if (color.startsWith('#')) {
-                        const hex = color.substring(1);
-                        r = parseInt(hex.substr(0, 2), 16);
-                        g = parseInt(hex.substr(2, 2), 16);
-                        b = parseInt(hex.substr(4, 2), 16);
-                    } else if (color.startsWith('rgb')) {
-                        const rgbValues = color.match(/\d+/g);
-                        if (rgbValues && rgbValues.length >= 3) {
-                            r = parseInt(rgbValues[0]);
-                            g = parseInt(rgbValues[1]);
-                            b = parseInt(rgbValues[2]);
-                        } else {
-                            return color;
-                        }
-                    } else {
-                        return color;
-                    }
-
-                    r = Math.max(0, Math.min(255, r + percent));
-                    g = Math.max(0, Math.min(255, g + percent));
-                    b = Math.max(0, Math.min(255, b + percent));
-
-                    return `rgb(${r}, ${g}, ${b})`;
-                } catch (e) {
-                    console.error('Error adjusting color brightness:', e);
-                    return color;
-                }
+                const rgb = parseColor(color);
+                if (!rgb) return color;
+                return `rgb(${rgb.map(v => Math.max(0, Math.min(255, v + percent))).join(',')})`;
             };
 
             const themeColors = getThemeColors();
@@ -654,6 +625,8 @@
         DEBUG.log('Process', 'Starting image processing');
 
         const img = getElement(SELECTORS.uploadPreview) ||
+                    document.querySelector('.upload_preview_container .upload_preview_img') ||
+                    document.querySelector('.upload_preview_img') ||
                     document.querySelector('#image') ||
                     document.querySelector('.original-file-unchanged') ||
                     document.querySelector('#image-container img') ||
@@ -1075,7 +1048,12 @@
         textarea.style.backgroundColor = '#ffffff';
         textarea.style.color = '#000000';
 
-        const textareaContainer = textarea.parentElement;
+        let textareaContainer = textarea.parentElement;
+
+        if (textareaContainer && textareaContainer.classList.contains('col2')) {
+        } else if (textareaContainer) {
+        }
+
         if (!textareaContainer) return null;
 
         const isUploadPage = window.location.href.includes('/uploads/new');
@@ -1452,13 +1430,64 @@
             }
         });
 
-        registerEventListener(cancelButton, 'click', () => {
+        const closeDialog = () => {
+            const suggestionContainers = dialog.querySelectorAll('.tag-suggestions-container');
+            suggestionContainers.forEach(container => {
+                container.style.display = 'none';
+            });
             dialog.close();
+            setTimeout(() => {
+                dialog.remove();
+            }, 100);
+        };
+
+        registerEventListener(cancelButton, 'click', closeDialog);
+
+        registerEventListener(saveButton, 'click', () => {
+            try {
+                DEBUG.log('Config', 'Saving configuration');
+                const newConfig = {
+                    localEndpoint: form.querySelector('[name="localEndpoint"]').value.trim(),
+                    confidence: parseFloat(form.querySelector('#confidence-slider').value),
+                    tagBlacklist: form.querySelector('[name="tagBlacklist"]').value.trim(),
+                    constantTags: form.querySelector('[name="constantTags"]').value.trim(),
+                    preserveExistingTags: form.querySelector('[name="preserveExistingTags"]').checked,
+                    rescaleTagBox: form.querySelector('[name="rescaleTagBox"]').checked,
+                    enableAutoTagOnEdit: form.querySelector('[name="enableAutoTagOnEdit"]').checked,
+                    sortingMode: form.querySelector('[name="sortingMode"]').value,
+                    requestTimeout: parseInt(form.querySelector('[name="requestTimeout"]').value) || DEFAULT_CONFIG.requestTimeout,
+                    maxRetries: parseInt(form.querySelector('[name="maxRetries"]').value) || DEFAULT_CONFIG.maxRetries
+                };
+
+                saveConfig(newConfig);
+                DEBUG.info('Config', 'Configuration saved successfully');
+
+                const confidenceInput = getElement(SELECTORS.confidenceInput);
+                if (confidenceInput) confidenceInput.value = newConfig.confidence;
+
+                setTimeout(() => {
+                    try {
+                        checkConnection().catch(err => {
+                            DEBUG.error('Config', 'Connection check failed after saving settings', err);
+                        });
+                    } catch (err) {
+                        DEBUG.error('Config', 'Error during connection check', err);
+                    }
+                }, 0);
+
+                showStatus('Settings saved successfully!');
+
+                setTimeout(closeDialog, 1500);
+            } catch (error) {
+                DEBUG.error('Config', 'Error saving settings', error);
+                console.error('Error saving settings:', error);
+                showStatus(`Error saving settings: ${error.message}`, true);
+            }
         });
 
         registerEventListener(dialog, 'click', (e) => {
             if (e.target === dialog) {
-                dialog.close();
+                closeDialog();
             }
         });
 
