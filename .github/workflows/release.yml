@@ -1,0 +1,87 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.js'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from userscript
+        id: get_version
+        run: |
+          # Find the .js file with @version
+          JS_FILE=$(find . -maxdepth 1 -name "*.js" -type f | head -n 1)
+
+          if [ -z "$JS_FILE" ]; then
+            echo "Error: No .js file found"
+            exit 1
+          fi
+
+          # Extract version number from @version line
+          VERSION=$(grep -oP '@version\s+\K[0-9]+\.[0-9]+\.[0-9]+' "$JS_FILE")
+
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version from $JS_FILE"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "js_file=$JS_FILE" >> $GITHUB_OUTPUT
+          echo "js_filename=$(basename "$JS_FILE")" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION in file: $JS_FILE"
+
+      - name: Check if release exists
+        id: check_release
+        run: |
+          if gh release view "v${{ steps.get_version.outputs.version }}" &> /dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.get_version.outputs.version }} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.get_version.outputs.version }} does not exist"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create or Update Release
+        run: |
+          VERSION="v${{ steps.get_version.outputs.version }}"
+          JS_FILE="${{ steps.get_version.outputs.js_file }}"
+          JS_FILENAME="${{ steps.get_version.outputs.js_filename }}"
+
+          # Extract changelog/description from recent commits (last 5 commits)
+          DESCRIPTION=$(git log -5 --pretty=format:"- %s" | head -c 500)
+
+          if [ "${{ steps.check_release.outputs.exists }}" == "true" ]; then
+            echo "Updating existing release $VERSION"
+            gh release upload "$VERSION" "$JS_FILE" --clobber
+          else
+            echo "Creating new release $VERSION"
+            gh release create "$VERSION" "$JS_FILE" \
+              --title "E6AutoTagger $VERSION" \
+              --notes "## Changes
+
+          $DESCRIPTION
+
+          ## Installation
+
+          1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
+          2. Download the \`$JS_FILENAME\` file
+          3. Drag and drop the file into Tampermonkey dashboard
+          4. Configure the AI endpoint in the script settings
+
+          **Note**: Requires JTP Pilot (Gradio 3) - see README.md for setup instructions."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
