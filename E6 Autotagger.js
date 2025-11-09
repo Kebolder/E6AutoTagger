@@ -20,8 +20,8 @@
 // @connect      e621.net
 // @connect      e926.net
 // @connect      e6ai.net
-// @updateURL    https://github.com/Kebolder/E6AutoTagger.git
-// @downloadURL  https://github.com/Kebolder/E6AutoTagger.git
+// @updateURL    https://github.com/Kebolder/E6AutoTagger/releases/latest/download/E6AutoTagger.js
+// @downloadURL  https://github.com/Kebolder/E6AutoTagger/releases/latest/download/E6AutoTagger.js
 // ==/UserScript==
 
 (function() {
