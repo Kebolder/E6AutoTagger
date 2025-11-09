@@ -20,6 +20,8 @@
 // @connect      e621.net
 // @connect      e926.net
 // @connect      e6ai.net
+// @updateURL    https://github.com/Kebolder/E6AutoTagger.git
+// @downloadURL  https://github.com/Kebolder/E6AutoTagger.git
 // ==/UserScript==
 
 (function() {
@@ -278,17 +280,17 @@
                     cssVars['--accent-color'] = accentColor;
 
                     const navBg = computedStyle.getPropertyValue('--nav-bg-color') ||
-                                 getBackgroundColor('.navigation') ||
-                                 '#2e2e2e';
+                          getBackgroundColor('.navigation') ||
+                          '#2e2e2e';
 
                     const pageBg = computedStyle.getPropertyValue('--page-bg-color') ||
-                                  getBackgroundColor('#page') ||
-                                  '#343434';
+                          getBackgroundColor('#page') ||
+                          '#343434';
 
                     const sectionColor = computedStyle.getPropertyValue('--color-section') ||
-                                       getBackgroundColor('.box-section') ||
-                                       getBackgroundColor('.section') ||
-                                       navBg;
+                          getBackgroundColor('.box-section') ||
+                          getBackgroundColor('.section') ||
+                          navBg;
 
                     cssVars['--bg-color'] = pageBg;
                     cssVars['--bg-color-alt'] = adjustBrightness(pageBg, 20);
@@ -329,7 +331,7 @@
                         const rgbValues = color.match(/\d+/g);
                         return rgbValues && rgbValues.length >= 3
                             ? rgbValues.slice(0, 3).map(v => parseInt(v))
-                            : null;
+                        : null;
                     }
                     return null;
                 } catch (e) {
@@ -353,8 +355,8 @@
             const themeColors = getThemeColors();
 
             const cssVarsString = Object.entries(themeColors)
-                .map(([key, value]) => `${key}: ${value};`)
-                .join('\n');
+            .map(([key, value]) => `${key}: ${value};`)
+            .join('\n');
 
             const styleElement = document.createElement('style');
             styleElement.id = 'e6-autotagger-styles';
@@ -393,7 +395,7 @@
     const normalizeTag = tag => {
         tag = tag.toLowerCase().trim();
         return tag.includes(' ') ? tag.replace(/\s+/g, '_') :
-            tag.includes('_') ? tag.replace(/_+/g, '_') : tag;
+        tag.includes('_') ? tag.replace(/_+/g, '_') : tag;
     };
 
     const formatTags = (tagString, existingTags = '') => {
@@ -406,16 +408,16 @@
         const config = state.config;
 
         const blacklist = config.tagBlacklist
-            .split(',')
-            .map(normalizeTag)
-            .filter(tag => tag.length > 0);
+        .split(',')
+        .map(normalizeTag)
+        .filter(tag => tag.length > 0);
 
         DEBUG.log('Tags', 'Blacklisted tags', blacklist);
 
         const newTags = tagString.split(',')
-            .map(tag => tag.trim())
-            .filter(tag => tag.length > 0 && !blacklist.includes(normalizeTag(tag)))
-            .map(tag => tag.replace(/\s+/g, '_'));
+        .map(tag => tag.trim())
+        .filter(tag => tag.length > 0 && !blacklist.includes(normalizeTag(tag)))
+        .map(tag => tag.replace(/\s+/g, '_'));
 
         DEBUG.log('Tags', 'Processed new tags', {
             count: newTags.length,
@@ -451,8 +453,8 @@
                     groupedTags[firstLetter].push(tag);
                 });
                 result = Object.keys(groupedTags).sort().map(letter =>
-                    groupedTags[letter].join(' ')
-                ).join('\n');
+                                                             groupedTags[letter].join(' ')
+                                                            ).join('\n');
                 break;
 
             case 'oneperline':
@@ -625,14 +627,14 @@
         DEBUG.log('Process', 'Starting image processing');
 
         const img = getElement(SELECTORS.uploadPreview) ||
-                    document.querySelector('.upload_preview_container .upload_preview_img') ||
-                    document.querySelector('.upload_preview_img') ||
-                    document.querySelector('#image') ||
-                    document.querySelector('.original-file-unchanged') ||
-                    document.querySelector('#image-container img') ||
-                    document.querySelector('img[id^="image-"]') ||
-                    document.querySelector('.image-container img') ||
-                    document.querySelector('#preview img');
+              document.querySelector('.upload_preview_container .upload_preview_img') ||
+              document.querySelector('.upload_preview_img') ||
+              document.querySelector('#image') ||
+              document.querySelector('.original-file-unchanged') ||
+              document.querySelector('#image-container img') ||
+              document.querySelector('img[id^="image-"]') ||
+              document.querySelector('.image-container img') ||
+              document.querySelector('#preview img');
 
         if (!img) {
             DEBUG.error('Process', 'Could not find image preview');
@@ -811,14 +813,14 @@
         };
 
         const handleSuggestionMouseover = (e) => {
-             const suggestion = e.target.closest('.tag-suggestion');
-             if (suggestion) {
-                 const suggestions = suggestionsContainer.querySelectorAll('.tag-suggestion');
-                 suggestions.forEach(s => s.classList.remove('active'));
-                 suggestion.classList.add('active');
-                 activeIndex = parseInt(suggestion.dataset.index, 10);
-             }
-         };
+            const suggestion = e.target.closest('.tag-suggestion');
+            if (suggestion) {
+                const suggestions = suggestionsContainer.querySelectorAll('.tag-suggestion');
+                suggestions.forEach(s => s.classList.remove('active'));
+                suggestion.classList.add('active');
+                activeIndex = parseInt(suggestion.dataset.index, 10);
+            }
+        };
 
         const addTagToTextarea = (textarea, tagName, isList) => {
             const currentValue = textarea.value;
@@ -841,11 +843,11 @@
 
                 let trailingCommaSpace = "";
                 const nextChar = textAfterSegment.trimStart().charAt(0);
-                 if (textAfterSegment.trim().length > 0 && nextChar !== ',') {
+                if (textAfterSegment.trim().length > 0 && nextChar !== ',') {
                     trailingCommaSpace = ", ";
-                 } else if (textAfterSegment.trimStart().startsWith(',')) {
-                     trailingCommaSpace = " ";
-                 }
+                } else if (textAfterSegment.trimStart().startsWith(',')) {
+                    trailingCommaSpace = " ";
+                }
 
                 newValue = textBeforeSegment + tagName + trailingCommaSpace + textAfterSegment.trimStart();
                 newCursorPos = textBeforeSegment.length + tagName.length + trailingCommaSpace.length;
@@ -901,16 +903,16 @@
                 termStart = termStart === -1 ? 0 : termStart + 1;
 
                 termEnd = currentValue.indexOf(',', cursorPosition);
-                 termEnd = termEnd === -1 ? currentValue.length : termEnd;
+                termEnd = termEnd === -1 ? currentValue.length : termEnd;
 
                 term = currentValue.substring(termStart, termEnd).trim();
 
-                 currentTagSegment = { term: term, start: termStart, end: termEnd };
+                currentTagSegment = { term: term, start: termStart, end: termEnd };
             } else {
-                 const textBeforeCursor = currentValue.substring(0, cursorPosition);
-                 const lastSpacePos = textBeforeCursor.lastIndexOf(' ');
-                 termStart = lastSpacePos === -1 ? 0 : lastSpacePos + 1;
-                 term = textBeforeCursor.substring(termStart).trim();
+                const textBeforeCursor = currentValue.substring(0, cursorPosition);
+                const lastSpacePos = textBeforeCursor.lastIndexOf(' ');
+                termStart = lastSpacePos === -1 ? 0 : lastSpacePos + 1;
+                term = textBeforeCursor.substring(termStart).trim();
             }
 
             fetchSuggestions(term);
@@ -936,20 +938,20 @@
                     break;
                 case 'Enter':
                 case 'Tab':
-                 {
-                    if (activeIndex === -1) return;
-                    e.preventDefault();
-                    const activeElement = suggestionsContainer.querySelector('.tag-suggestion.active');
-                    if (activeElement) {
-                        const index = parseInt(activeElement.dataset.index, 10);
-                        if (index >= 0 && index < currentSuggestions.length) {
-                            addTagToTextarea(textarea, currentSuggestions[index].name, isCommaSeparated);
+                    {
+                        if (activeIndex === -1) return;
+                        e.preventDefault();
+                        const activeElement = suggestionsContainer.querySelector('.tag-suggestion.active');
+                        if (activeElement) {
+                            const index = parseInt(activeElement.dataset.index, 10);
+                            if (index >= 0 && index < currentSuggestions.length) {
+                                addTagToTextarea(textarea, currentSuggestions[index].name, isCommaSeparated);
+                            }
+                        } else {
+                            suggestionsContainer.style.display = 'none';
                         }
-                    } else {
-                         suggestionsContainer.style.display = 'none';
+                        break;
                     }
-                    break;
-                }
                 case 'Escape':
                     e.preventDefault();
                     suggestionsContainer.style.display = 'none';
@@ -963,9 +965,9 @@
 
         return {
             destroy: () => {
-                 suggestionsContainer.removeEventListener('click', handleSuggestionClick);
-                 suggestionsContainer.removeEventListener('mouseover', handleSuggestionMouseover);
-                 suggestionsContainer.remove();
+                suggestionsContainer.removeEventListener('click', handleSuggestionClick);
+                suggestionsContainer.removeEventListener('mouseover', handleSuggestionMouseover);
+                suggestionsContainer.remove();
             }
         };
     };
@@ -1003,10 +1005,10 @@
         }
 
         const formattedConstantTags = config.constantTags
-            .split(',')
-            .map(tag => tag.trim())
-            .map(tag => tag.replace(/\s+/g, '_'))
-            .join(' ');
+        .split(',')
+        .map(tag => tag.trim())
+        .map(tag => tag.replace(/\s+/g, '_'))
+        .join(' ');
 
         DEBUG.log('ConstantTags', 'Formatted constant tags', { formattedConstantTags });
 
@@ -1183,7 +1185,7 @@
         form.appendChild(title);
 
         addConfigInput(form, 'localEndpoint', 'AI Endpoint URL', config.localEndpoint, 'text',
-            'Enter the URL of your local AI endpoint (without /api/predict)');
+                       'Enter the URL of your local AI endpoint (without /api/predict)');
 
         const confidenceContainer = document.createElement('div');
         confidenceContainer.className = 'config-row';
@@ -1209,33 +1211,33 @@
         confidenceContainer.appendChild(confidenceSlider);
 
         addConfigInput(form, 'requestTimeout', 'Request Timeout (ms)', config.requestTimeout, 'number',
-            'Maximum time to wait for API response in milliseconds');
+                       'Maximum time to wait for API response in milliseconds');
 
         addConfigInput(form, 'maxRetries', 'Max Retries', config.maxRetries, 'number',
-            'Number of times to retry failed requests');
+                       'Number of times to retry failed requests');
 
         const blacklistContainer = document.createElement('div');
         blacklistContainer.className = 'config-row';
         form.appendChild(blacklistContainer);
         const blacklistTextarea = addConfigInput(blacklistContainer, 'tagBlacklist', 'Tag Blacklist', config.tagBlacklist, 'textarea',
-            'Comma-separated list of tags to exclude');
+                                                 'Comma-separated list of tags to exclude');
         addAutocompleteToTextarea(blacklistTextarea, blacklistContainer, true);
 
         const autoTagsContainer = document.createElement('div');
         autoTagsContainer.className = 'config-row';
         form.appendChild(autoTagsContainer);
         const autoTagsTextarea = addConfigInput(autoTagsContainer, 'constantTags', 'Constant Tags', config.constantTags, 'textarea',
-            'Comma-separated list of tags to add automatically');
+                                                'Comma-separated list of tags to add automatically');
         addAutocompleteToTextarea(autoTagsTextarea, autoTagsContainer, true);
 
         addConfigCheckbox(form, 'preserveExistingTags', 'Preserve Existing Tags', config.preserveExistingTags,
-            'Keep existing tags when generating new ones');
+                          'Keep existing tags when generating new ones');
 
         addConfigCheckbox(form, 'rescaleTagBox', 'Rescale Tag Box on Sort/Generate', config.rescaleTagBox,
-            'Automatically resize the tag box to show all tags');
+                          'Automatically resize the tag box to show all tags');
 
         addConfigCheckbox(form, 'enableAutoTagOnEdit', 'Enable Constant Tags on Edit', config.enableAutoTagOnEdit,
-            'Apply constant tags when editing existing posts');
+                          'Apply constant tags when editing existing posts');
 
         const sortingContainer = document.createElement('div');
         sortingContainer.className = 'config-row';
@@ -1375,7 +1377,7 @@
 
                 const originalEndpoint = config.localEndpoint;
                 const formattedEndpoint = endpoint.endsWith('/api/predict') ?
-                    endpoint : endpoint.replace(/\/$/, '') + '/api/predict';
+                      endpoint : endpoint.replace(/\/$/, '') + '/api/predict';
 
                 state.config = { ...config, localEndpoint: formattedEndpoint };
 
