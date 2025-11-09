@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         E6 Autotagger
-// @version      2.3.6
+// @version      2.3.7
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -1574,6 +1574,43 @@
         }
     };
 
+    const checkForUploadPage = () => {
+        const currentUrl = window.location.href;
+
+        if (currentUrl.includes('/uploads/new')) {
+            const tagTextarea = getTagTextarea();
+            if (tagTextarea) {
+                if (!state.initializedPages.has(currentUrl)) {
+                    state.initializedPages.add(currentUrl);
+                    init();
+                }
+                return;
+            }
+
+            const observer = registerObserver(new MutationObserver((mutations, obs) => {
+                const textarea = getTagTextarea();
+                if (textarea) {
+                    obs.disconnect();
+                    setTimeout(() => {
+                        if (!state.initializedPages.has(currentUrl)) {
+                            state.initializedPages.add(currentUrl);
+                            init();
+                        }
+                    }, 300);
+                }
+            }));
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: false
+            });
+
+            setTimeout(() => observer.disconnect(), 10000);
+        }
+    };
+
     const handleUrlChange = () => {
         let lastUrl = location.href;
 
@@ -1590,6 +1627,7 @@
 
                 setTimeout(() => {
                     checkForEditPage();
+                    checkForUploadPage();
                 }, 500);
             }
         }));
@@ -1611,6 +1649,7 @@
         } else {
             DEBUG.log("Init", "No tag textarea found, may be on a view-only page");
             checkForEditPage();
+            checkForUploadPage();
         }
     };
 
@@ -1624,11 +1663,17 @@
     }
 
     registerEventListener(document, "DOMContentLoaded", () => {
-        setTimeout(checkForEditPage, 500);
+        setTimeout(() => {
+            checkForEditPage();
+            checkForUploadPage();
+        }, 500);
     });
 
     registerEventListener(window, "load", () => {
-        setTimeout(checkForEditPage, 500);
+        setTimeout(() => {
+            checkForEditPage();
+            checkForUploadPage();
+        }, 500);
         handleUrlChange();
     });
 
