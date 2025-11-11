@@ -5,8 +5,6 @@
 
 
 
-## [Original/Base by meusartis](https://github.com/Meus-Artis/e6AutoTagger) Recoded and improved by Me!
-
 
 ~Not so~ Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP Pilot](https://huggingface.co/RedRocket/JointTaggerProject) furry auto tagger on all 3 E6 based websites (E621, E629, E6AI).
 
