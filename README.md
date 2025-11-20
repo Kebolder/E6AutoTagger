@@ -9,7 +9,12 @@ This repo now ships a custom local build of **JTP-3 Hydra** specifically wired f
 
 
 
+<<<<<<< HEAD
 [Tampermonkey](https://www.tampermonkey.net/) script to allow use of a local **JTP-3 Hydra** furry auto tagger on all 3 E6‑based websites (E621, E926, E6AI).
+=======
+
+~Not so~ Simple [tampermonkey](https://www.tampermonkey.net/) script to allow use of [JTP Pilot](https://huggingface.co/RedRocket/JointTaggerProject) furry auto tagger on all 3 E6 based websites (E621, E629, E6AI).
+>>>>>>> 79c57d246ae3424df539891073f466d381c8a410
 
 
 ## Features
