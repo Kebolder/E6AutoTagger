@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         E6 Autotagger
-// @version      2.3.7
+// @version      2.4.0
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -28,7 +28,7 @@
     'use strict';
 
     const DEFAULT_CONFIG = {
-        localEndpoint: 'http://127.0.0.1:7860',
+        localEndpoint: 'http://127.0.0.1:7860/api/e6',
         confidence: 0.25,
         tagBlacklist: '',
         constantTags: '',
@@ -176,7 +176,8 @@
         initializedPages: new Set(),
         isWatchingEditButton: false,
         observers: [],
-        eventListeners: []
+        eventListeners: [],
+        suppressAutocomplete: false
     };
 
     const elementCache = new Map();
@@ -202,7 +203,40 @@
         }
     };
 
-    GM_registerMenuCommand('Toggle Console logs', () => DEBUG.toggle());
+    const normalizeEndpoint = (rawEndpoint) => {
+        let endpoint = (rawEndpoint || '').trim();
+        if (!endpoint) return DEFAULT_CONFIG.localEndpoint;
+
+        try {
+            const url = new URL(endpoint, window.location.origin);
+            const origin = url.origin;
+            const path = url.pathname.replace(/\/+$/, '');
+
+            if (path.match(/\/api\/e6\/(predict|health)$/)) {
+                return `${origin}${path.replace(/\/(predict|health)$/, '')}`;
+            }
+            if (path.endsWith('/api/e6')) {
+                return `${origin}${path}`;
+            }
+            if (path.endsWith('/api/predict')) {
+                return `${origin}${path.replace(/\/api\/predict$/, '/api/e6')}`;
+            }
+
+            return `${origin}/api/e6`;
+        } catch (e) {
+            endpoint = endpoint.replace(/\/+$/, '');
+            if (endpoint.match(/\/api\/e6\/(predict|health)\/?$/)) {
+                return endpoint.replace(/\/(predict|health)\/?$/, '');
+            }
+            if (endpoint.endsWith('/api/e6')) {
+                return endpoint;
+            }
+            if (endpoint.endsWith('/api/predict')) {
+                return endpoint.replace(/\/api\/predict\/?$/, '/api/e6');
+            }
+            return `${endpoint}/api/e6`;
+        }
+    };
 
     const loadConfig = () => {
         DEBUG.log('Config', 'Loading configuration');
@@ -212,15 +246,21 @@
             config[key] = GM_getValue(key, DEFAULT_CONFIG[key]);
         }
 
-        if (!config.localEndpoint.endsWith('/api/predict')) {
-            config.localEndpoint = config.localEndpoint.replace(/\/$/, '') + '/api/predict';
-            DEBUG.log('Config', 'Adjusted API endpoint format', config.localEndpoint);
-        }
+        config.localEndpoint = normalizeEndpoint(config.localEndpoint || DEFAULT_CONFIG.localEndpoint);
+        DEBUG.log('Config', 'Normalized API base endpoint', config.localEndpoint);
 
         state.config = config;
         DEBUG.log('Config', 'Configuration loaded', config);
         return config;
     };
+
+    const getApiBase = () => {
+        const config = state.config || loadConfig();
+        return (config.localEndpoint || DEFAULT_CONFIG.localEndpoint).replace(/\/$/, '');
+    };
+
+    const getHealthEndpoint = () => `${getApiBase()}/health`;
+    const getPredictEndpoint = () => `${getApiBase()}/predict`;
 
     const saveConfig = (newConfig) => {
         DEBUG.log('Config', 'Saving new configuration', newConfig);
@@ -482,14 +522,16 @@
             const config = state.config || loadConfig();
 
             GM_xmlhttpRequest({
-                method: "POST",
-                url: config.localEndpoint,
-                headers: { "Content-Type": "application/json" },
-                data: JSON.stringify({ data: ["", config.confidence], fn_index: 0 }),
+                method: "GET",
+                url: getHealthEndpoint(),
+                headers: { "Accept": "application/json" },
                 timeout: config.requestTimeout,
                 onload: response => {
                     try {
-                        JSON.parse(response.responseText);
+                        const parsed = JSON.parse(response.responseText);
+                        if (!parsed || parsed.status !== "ok") {
+                            throw new Error("Health check failed");
+                        }
                         state.lastSuccessfulCheck = Date.now();
                         DEBUG.info('Connection', 'Connection successful');
                         if (updateUI) setConnectionState(true);
@@ -582,14 +624,14 @@
         try {
             return await new Promise((resolve, reject) => {
                 const payload = {
-                    data: [imageDataUrl, config.confidence],
-                    fn_index: 0
+                    image: imageDataUrl,
+                    confidence: config.confidence
                 };
                 DEBUG.log('API Send', 'Sending payload:', payload);
 
                 GM_xmlhttpRequest({
                     method: "POST",
-                    url: config.localEndpoint,
+                    url: getPredictEndpoint(),
                     headers: {
                         "Content-Type": "application/json",
                         "Accept": "application/json"
@@ -677,21 +719,26 @@
                     preserveExisting: state.config.preserveExistingTags
                 });
 
-                textarea.value = formatTags(tagString, existingTags);
-                DEBUG.info('Process', 'Tags applied to textarea', {
-                    finalTagCount: textarea.value.split(/\s+/).filter(t => t.trim()).length
-                });
+                state.suppressAutocomplete = true;
+                try {
+                    textarea.value = formatTags(tagString, existingTags);
+                    DEBUG.info('Process', 'Tags applied to textarea', {
+                        finalTagCount: textarea.value.split(/\s+/).filter(t => t.trim()).length
+                    });
 
-                ['input', 'change'].forEach(eventType => {
-                    textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
-                });
+                    ['input', 'change'].forEach(eventType => {
+                        textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+                    });
 
-                if (state.config.rescaleTagBox) {
-                    resizeTagBox(textarea);
+                    if (state.config.rescaleTagBox) {
+                        resizeTagBox(textarea);
+                    }
+
+                    textarea.focus();
+                    textarea.blur();
+                } finally {
+                    state.suppressAutocomplete = false;
                 }
-
-                textarea.focus();
-                textarea.blur();
 
                 state.lastSuccessfulCheck = Date.now();
                 setConnectionState(true);
@@ -892,6 +939,13 @@
         };
 
         const handleInput = (e) => {
+            if (state.suppressAutocomplete) {
+                suggestionsContainer.style.display = 'none';
+                currentSuggestions = [];
+                activeIndex = -1;
+                return;
+            }
+
             const cursorPosition = textarea.selectionStart;
             const currentValue = textarea.value;
             let term = '';
@@ -1140,14 +1194,20 @@
             if (!textarea.value.trim()) return;
 
             const config = state.config || loadConfig();
-            textarea.value = formatTags(textarea.value.replace(/\s+/g, ','));
 
-            ['input', 'change'].forEach(eventType => {
-                textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
-            });
+            state.suppressAutocomplete = true;
+            try {
+                textarea.value = formatTags(textarea.value.replace(/\s+/g, ','));
 
-            if (config.rescaleTagBox) {
-                resizeTagBox(textarea);
+                ['input', 'change'].forEach(eventType => {
+                    textarea.dispatchEvent(new Event(eventType, { bubbles: true }));
+                });
+
+                if (config.rescaleTagBox) {
+                    resizeTagBox(textarea);
+                }
+            } finally {
+                state.suppressAutocomplete = false;
             }
         });
 
@@ -1185,7 +1245,7 @@
         form.appendChild(title);
 
         addConfigInput(form, 'localEndpoint', 'AI Endpoint URL', config.localEndpoint, 'text',
-                       'Enter the URL of your local AI endpoint (without /api/predict)');
+                       'Enter the base URL of your local AI endpoint (for example: http://127.0.0.1:7860/api/e6)');
 
         const confidenceContainer = document.createElement('div');
         confidenceContainer.className = 'config-row';
@@ -1364,10 +1424,10 @@
             }, 3000);
         };
 
-        registerEventListener(testButton, 'click', async () => {
-            testButton.disabled = true;
+          registerEventListener(testButton, 'click', async () => {
+              testButton.disabled = true;
 
-            try {
+              try {
                 const endpointInput = form.querySelector('input[name="localEndpoint"]');
                 const endpoint = endpointInput.value.trim();
 
@@ -1376,8 +1436,7 @@
                 }
 
                 const originalEndpoint = config.localEndpoint;
-                const formattedEndpoint = endpoint.endsWith('/api/predict') ?
-                      endpoint : endpoint.replace(/\/$/, '') + '/api/predict';
+                const formattedEndpoint = normalizeEndpoint(endpoint);
 
                 state.config = { ...config, localEndpoint: formattedEndpoint };
 
@@ -1389,46 +1448,6 @@
                 showStatus(`Connection failed: ${error.message}`, true);
             } finally {
                 testButton.disabled = false;
-            }
-        });
-
-        registerEventListener(saveButton, 'click', () => {
-            try {
-                DEBUG.log('Config', 'Saving configuration');
-                const newConfig = {
-                    localEndpoint: form.querySelector('[name="localEndpoint"]').value.trim(),
-                    confidence: parseFloat(form.querySelector('#confidence-slider').value),
-                    tagBlacklist: form.querySelector('[name="tagBlacklist"]').value.trim(),
-                    constantTags: form.querySelector('[name="constantTags"]').value.trim(),
-                    preserveExistingTags: form.querySelector('[name="preserveExistingTags"]').checked,
-                    rescaleTagBox: form.querySelector('[name="rescaleTagBox"]').checked,
-                    enableAutoTagOnEdit: form.querySelector('[name="enableAutoTagOnEdit"]').checked,
-                    sortingMode: form.querySelector('[name="sortingMode"]').value,
-                    requestTimeout: parseInt(form.querySelector('[name="requestTimeout"]').value) || DEFAULT_CONFIG.requestTimeout,
-                    maxRetries: parseInt(form.querySelector('[name="maxRetries"]').value) || DEFAULT_CONFIG.maxRetries
-                };
-
-                saveConfig(newConfig);
-                DEBUG.info('Config', 'Configuration saved successfully');
-
-                const confidenceInput = getElement(SELECTORS.confidenceInput);
-                if (confidenceInput) confidenceInput.value = newConfig.confidence;
-
-                setTimeout(() => {
-                    try {
-                        checkConnection().catch(err => {
-                            DEBUG.error('Config', 'Connection check failed after saving settings', err);
-                        });
-                    } catch (err) {
-                        DEBUG.error('Config', 'Error during connection check', err);
-                    }
-                }, 0);
-
-                showStatus('Settings saved successfully!');
-            } catch (error) {
-                DEBUG.error('Config', 'Error saving settings', error);
-                console.error('Error saving settings:', error);
-                showStatus(`Error saving settings: ${error.message}`, true);
             }
         });
 

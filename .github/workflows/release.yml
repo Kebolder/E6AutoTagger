@@ -61,6 +61,13 @@ jobs:
           cp "$JS_FILE" "E6AutoTagger.js"
           echo "Renamed $JS_FILE to E6AutoTagger.js"
 
+      - name: Package JTP-3 backend
+        run: |
+          if [ -d "JTP-3" ]; then
+            zip -r "JTP-3.zip" "JTP-3"
+            echo "Packaged JTP-3 backend into JTP-3.zip"
+          fi
+
       - name: Create or Update Release
         run: |
           VERSION="v${{ steps.get_version.outputs.version }}"
@@ -73,7 +80,7 @@ jobs:
             # Delete the release to remove old assets
             gh release delete "$VERSION" --yes
             echo "Creating new release $VERSION with updated file"
-            gh release create "$VERSION" "E6AutoTagger.js" \
+            gh release create "$VERSION" "E6AutoTagger.js" "JTP-3.zip" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 
@@ -84,12 +91,14 @@ jobs:
           1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
           2. Download the \`E6AutoTagger.js\` file
           3. Drag and drop the file into Tampermonkey dashboard
-          4. Configure the AI endpoint in the script settings
+          4. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
+          5. In the bundled \`JTP-3\` folder, run \`install.bat\` once to install dependencies
+          6. Before using the autotagger, run \`app.bat\` in the \`JTP-3\` folder and leave it running
 
-          **Note**: Requires JTP Pilot (Gradio 3) - see README.md for setup instructions."
+          **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
           else
             echo "Creating new release $VERSION"
-            gh release create "$VERSION" "E6AutoTagger.js" \
+            gh release create "$VERSION" "E6AutoTagger.js" "JTP-3.zip" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 
@@ -100,9 +109,11 @@ jobs:
           1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
           2. Download the \`E6AutoTagger.js\` file
           3. Drag and drop the file into Tampermonkey dashboard
-          4. Configure the AI endpoint in the script settings
+          4. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
+          5. In the bundled \`JTP-3\` folder, run \`install.bat\` once to install dependencies
+          6. Before using the autotagger, run \`app.bat\` in the \`JTP-3\` folder and leave it running
 
-          **Note**: Requires JTP Pilot (Gradio 3) - see README.md for setup instructions."
+          **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
