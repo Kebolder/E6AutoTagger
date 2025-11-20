@@ -58,8 +58,12 @@ jobs:
       - name: Rename file to E6AutoTagger.js
         run: |
           JS_FILE="${{ steps.get_version.outputs.js_file }}"
-          cp "$JS_FILE" "E6AutoTagger.js"
-          echo "Renamed $JS_FILE to E6AutoTagger.js"
+          if [ "$JS_FILE" != "./E6AutoTagger.js" ] && [ "$JS_FILE" != "E6AutoTagger.js" ]; then
+            cp "$JS_FILE" "E6AutoTagger.js"
+            echo "Renamed $JS_FILE to E6AutoTagger.js"
+          else
+            echo "JS file is already named E6AutoTagger.js"
+          fi
 
       - name: Package JTP-3 backend
         run: |
