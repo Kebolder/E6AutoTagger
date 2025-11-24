@@ -8,3 +8,4 @@ gradio
 requests
 fastapi
 uvicorn
+gradio==5.49.1
