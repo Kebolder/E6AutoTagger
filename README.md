@@ -2,7 +2,7 @@
 
 ## JTP-3 Hydra Integration
 
-This repo now ships a custom local build of **JTP-3 Hydra** specifically wired for the E6 Autotagger.
+This repo now ships a custom local build of **JTP-3 Hydra** for the E6 Autotagger.
 
 - Original model: [RedRocket/JTP-3 on Hugging Face](https://huggingface.co/RedRocket/JTP-3)
 - Custom integration: bundled in this repo under the `JTP-3/` folder, exposing a simple HTTP API at `http://127.0.0.1:7860/api/e6` for the userscript.
