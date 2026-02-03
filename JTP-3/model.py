@@ -143,7 +143,7 @@ def load_model(path: str, device: torch.device | str | None = None) -> tuple[NaF
         'naflexvit_so400m_patch16_siglip',
         pretrained=False, num_classes=0,
         pos_embed_interp_mode="bilinear",
-        weight_init="skip", fix_init=False,
+        weight_init="", fix_init=False,
         device="cpu", dtype=torch.bfloat16,
     )
 
