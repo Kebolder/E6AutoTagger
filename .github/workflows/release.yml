@@ -87,10 +87,7 @@ jobs:
           # Clean up
           rm -rf "$BUNDLE_NAME"
           
-          # Also create separate JTP-3.zip for backward compatibility
-          if [ -d "JTP-3" ]; then
-            zip -r "JTP-3.zip" "JTP-3"
-          fi
+          # Only creating bundled zip - no separate files needed
 
       - name: Create or Update Release
         run: |
@@ -106,7 +103,7 @@ jobs:
             # Delete the release to remove old assets
             gh release delete "$VERSION" --yes
             echo "Creating new release $VERSION with updated files"
-            gh release create "$VERSION" "$BUNDLE_FILE" "E6AutoTagger.js" "JTP-3.zip" \
+            gh release create "$VERSION" "$BUNDLE_FILE" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 
@@ -125,7 +122,7 @@ jobs:
           **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
           else
             echo "Creating new release $VERSION"
-            gh release create "$VERSION" "$BUNDLE_FILE" "E6AutoTagger.js" "JTP-3.zip" \
+            gh release create "$VERSION" "$BUNDLE_FILE" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         E6 Autotagger
-// @version      2.4.1
+// @version      2.4.2
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
