@@ -32,18 +32,17 @@ This repo now ships a custom local build of **JTP-3 Hydra** specifically wired f
 ## Backend Setup (Custom JTP-3)
 
 1. Either clone this repo (which already contains `JTP-3/`), **or** download the `JTP-3.zip` asset from the latest GitHub release and extract it next to `E6AutoTagger.js`.
-2. Open the `JTP-3` folder.
-3. Run `install.bat` once to create the virtual environment and install all requirements (including FastAPI + Gradio).
-4. After installation, run `app.bat` whenever you want to use the autotagger.
+2. Run **`install.bat`** in the **root folder** once to download the model, create the virtual environment, and install all requirements (including FastAPI + Gradio).
+3. After installation, run **`app.bat`** in the **root folder** whenever you want to use the autotagger.
    - Wait until the console shows something like:  
      `Uvicorn running on http://127.0.0.1:7860`
-5. Do **not** close this window while using the E6 Autotagger.
+4. Do **not** close this window while using the E6 Autotagger.
 
 The userscript expects the API to be available at `http://127.0.0.1:7860/api/e6`. You can change this in the script’s configuration dialog if needed.
 
 ## Usage
-* Start the custom JTP-3 backend by running `app.bat` in the `JTP-3` folder.
-* Open the upload page or edit page on an E6 site and hit **"Generate Tags”**.
+* Start the custom JTP-3 backend by running **`app.bat`** in the **root folder**.
+* Open the upload page or edit page on an E6 site and hit **"Generate Tags"**.
 
 
 https://github.com/user-attachments/assets/ca3e6a6d-0d2c-4852-af98-f8aaa26abd1c
@@ -52,9 +51,9 @@ https://github.com/user-attachments/assets/ca3e6a6d-0d2c-4852-af98-f8aaa26abd1c
 ## Installation
 
 * First install tampermonkey from plugin store [(Like chrome store)](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-* In this repo’s `JTP-3` folder, run `install.bat` once to set up the JTP-3 Hydra backend.
-* After that, run `app.bat` in the `JTP-3` folder whenever you want to use the Autotagger.
-* Install the script into Tampermonkey’s dashboard by dragging the `E6AutoTagger.js` file into the dashboard.
-* Open an E621/E926/E6AI upload page, then hit **“Generate Tags**.
+* Run **`install.bat`** in the **root folder** once to set up the JTP-3 Hydra backend (this downloads the model and installs requirements).
+* After that, run **`app.bat`** in the **root folder** whenever you want to use the Autotagger.
+* Install the script into Tampermonkey's dashboard by dragging the `E6AutoTagger.js` file into the dashboard.
+* Open an E621/E926/E6AI upload page, then hit **"Generate Tags"**.
 
 https://github.com/user-attachments/assets/7923d896-c391-48b5-9d84-c706d9f1efc2

@@ -65,11 +65,31 @@ jobs:
             echo "JS file is already named E6AutoTagger.js"
           fi
 
-      - name: Package JTP-3 backend
+      - name: Package release bundle
         run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          BUNDLE_NAME="E6AutoTagger-v${VERSION}"
+          
+          # Create a temporary directory for the bundle
+          mkdir -p "$BUNDLE_NAME"
+          
+          # Copy all required files
+          cp -r "JTP-3" "$BUNDLE_NAME/"
+          cp "E6AutoTagger.js" "$BUNDLE_NAME/"
+          cp "install.bat" "$BUNDLE_NAME/"
+          cp "app.bat" "$BUNDLE_NAME/"
+          cp "README.md" "$BUNDLE_NAME/" 2>/dev/null || true
+          
+          # Create the zip
+          zip -r "${BUNDLE_NAME}.zip" "$BUNDLE_NAME"
+          echo "Created ${BUNDLE_NAME}.zip"
+          
+          # Clean up
+          rm -rf "$BUNDLE_NAME"
+          
+          # Also create separate JTP-3.zip for backward compatibility
           if [ -d "JTP-3" ]; then
             zip -r "JTP-3.zip" "JTP-3"
-            echo "Packaged JTP-3 backend into JTP-3.zip"
           fi
 
       - name: Create or Update Release
@@ -79,12 +99,14 @@ jobs:
           # Extract changelog/description from recent commits (last 5 commits)
           DESCRIPTION=$(git log -5 --pretty=format:"- %s" | head -c 500)
 
+          BUNDLE_FILE="E6AutoTagger-v${{ steps.get_version.outputs.version }}.zip"
+          
           if [ "${{ steps.check_release.outputs.exists }}" == "true" ]; then
             echo "Updating existing release $VERSION - removing old assets"
             # Delete the release to remove old assets
             gh release delete "$VERSION" --yes
-            echo "Creating new release $VERSION with updated file"
-            gh release create "$VERSION" "E6AutoTagger.js" "JTP-3.zip" \
+            echo "Creating new release $VERSION with updated files"
+            gh release create "$VERSION" "$BUNDLE_FILE" "E6AutoTagger.js" "JTP-3.zip" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 
@@ -92,17 +114,18 @@ jobs:
 
           ## Installation
 
+          **Recommended**: Download \`$BUNDLE_FILE\` and extract it.
+
           1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
-          2. Download the \`E6AutoTagger.js\` file
-          3. Drag and drop the file into Tampermonkey dashboard
-          4. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
-          5. In the bundled \`JTP-3\` folder, run \`install.bat\` once to install dependencies
-          6. Before using the autotagger, run \`app.bat\` in the \`JTP-3\` folder and leave it running
+          2. Drag \`E6AutoTagger.js\` from the extracted folder into Tampermonkey dashboard
+          3. Run \`install.bat\` in the extracted folder once to download the model and install dependencies
+          4. Before using the autotagger, run \`app.bat\` and leave it running
+          5. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
 
           **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
           else
             echo "Creating new release $VERSION"
-            gh release create "$VERSION" "E6AutoTagger.js" "JTP-3.zip" \
+            gh release create "$VERSION" "$BUNDLE_FILE" "E6AutoTagger.js" "JTP-3.zip" \
               --title "E6AutoTagger $VERSION" \
               --notes "## Changes
 
@@ -110,12 +133,13 @@ jobs:
 
           ## Installation
 
+          **Recommended**: Download \`$BUNDLE_FILE\` and extract it.
+
           1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
-          2. Download the \`E6AutoTagger.js\` file
-          3. Drag and drop the file into Tampermonkey dashboard
-          4. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
-          5. In the bundled \`JTP-3\` folder, run \`install.bat\` once to install dependencies
-          6. Before using the autotagger, run \`app.bat\` in the \`JTP-3\` folder and leave it running
+          2. Drag \`E6AutoTagger.js\` from the extracted folder into Tampermonkey dashboard
+          3. Run \`install.bat\` in the extracted folder once to download the model and install dependencies
+          4. Before using the autotagger, run \`app.bat\` and leave it running
+          5. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
 
           **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
           fi
