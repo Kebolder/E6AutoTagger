@@ -33,7 +33,35 @@ else:
     torch.backends.cudnn.allow_tf32 = True
 
 model_lock = Lock()
-model, tag_list = load_model("models/jtp-3-hydra.safetensors", device=device)
+MODEL_PATH = "models/jtp-3-hydra.safetensors"
+
+def load_model_or_exit():
+    if not os.path.exists(MODEL_PATH):
+        raise SystemExit(
+            f"Missing model file: {MODEL_PATH}\n"
+            "Run ..\\install.bat from the project root to download it."
+        )
+
+    # Guard against truncated/bad downloads before safetensors parsing.
+    if os.path.getsize(MODEL_PATH) < (100 * 1024 * 1024):
+        raise SystemExit(
+            f"Model file looks incomplete: {MODEL_PATH}\n"
+            "Delete it and run ..\\install.bat from the project root to redownload."
+        )
+
+    try:
+        return load_model(MODEL_PATH, device=device)
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc).lower()
+        if "header too large" in msg:
+            raise SystemExit(
+                "Model file appears corrupted or not a real .safetensors payload.\n"
+                "Delete models\\jtp-3-hydra.safetensors and run ..\\install.bat "
+                "from the project root to redownload."
+            ) from exc
+        raise
+
+model, tag_list = load_model_or_exit()
 model.requires_grad_(False)
 
 def rewrite_tag(tag: str) -> str:
