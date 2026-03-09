@@ -15,7 +15,7 @@ if "%ok%"=="n" exit /b
 goto install_loop
 
 :install
-call .\install.bat
+call ..\install.bat
 
 :ready
 call venv\Scripts\activate.bat
