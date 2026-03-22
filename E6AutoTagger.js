@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         E6 Autotagger
-// @version      2.4.5
+// @version      2.4.6
 // @author       Jax (Slop_Dragon)
 // @description  Adds a button that automatically tags e621 images using local AI
 // @icon         https://www.google.com/s2/favicons?domain=e621.net
@@ -155,6 +155,7 @@
         warningText: '.ai-warning-text',
         confidenceInput: '.ai-confidence-input',
         uploadPreview: '.upload_preview_img',
+        uploadSourceInput: '#upload_source, #post_source, input[name="upload[source]"], input[name="post[source]"]',
         tagTextarea: '#post_tags',
         editTagTextarea: '#post_tag_string',
     };
@@ -603,30 +604,71 @@
         return state.connectionCheckInterval;
     };
 
-    const fetchImage = async (imageUrl) => {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: imageUrl,
-                responseType: "blob",
-                timeout: state.config.requestTimeout,
-                onload: response => resolve(response.response),
-                onerror: err => reject(new Error(`Error fetching image: ${err.error || 'Unknown error'}`)),
-                ontimeout: () => reject(new Error("Image fetch timed out"))
-            });
-        });
+    const getUploadSourceUrl = () => {
+        const input = document.querySelector(SELECTORS.uploadSourceInput);
+        if (!input || typeof input.value !== 'string') return '';
+        return input.value.trim();
     };
 
-    const sendToAI = async (imageDataUrl, retryCount = 0) => {
+    const getPreviewImageElement = () => {
+        return getElement(SELECTORS.uploadPreview) ||
+               document.querySelector('.upload_preview_container .upload_preview_img') ||
+               document.querySelector('.upload_preview_img') ||
+               document.querySelector('#image') ||
+               document.querySelector('.original-file-unchanged') ||
+               document.querySelector('#image-container img') ||
+               document.querySelector('img[id^="image-"]') ||
+               document.querySelector('.image-container img') ||
+               document.querySelector('#preview img');
+    };
+
+    const imageElementToDataUrl = async (img) => {
+        if (!img) {
+            throw new Error("Could not find the image preview. Please try again.");
+        }
+
+        try {
+            if (img.decode) {
+                await img.decode();
+            } else if (!img.complete) {
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                });
+            }
+        } catch (e) {
+            DEBUG.warn('Process', 'Image decode failed, continuing with current frame', e);
+        }
+
+        const width = img.naturalWidth || img.width;
+        const height = img.naturalHeight || img.height;
+        if (!width || !height) {
+            throw new Error("Image preview is not ready yet. Wait a moment and try again.");
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            throw new Error("Could not create canvas context for image extraction.");
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        return canvas.toDataURL('image/png');
+    };
+
+    const sendToAI = async ({ imageDataUrl = null, imageUrl = null }, retryCount = 0) => {
         const config = state.config || loadConfig();
         DEBUG.log('API Send', 'Preparing to send to AI with confidence:', config.confidence);
 
         try {
             return await new Promise((resolve, reject) => {
                 const payload = {
-                    image: imageDataUrl,
                     confidence: config.confidence
                 };
+                if (imageDataUrl) payload.image = imageDataUrl;
+                if (imageUrl) payload.image_url = imageUrl;
                 DEBUG.log('API Send', 'Sending payload:', payload);
 
                 GM_xmlhttpRequest({
@@ -654,7 +696,7 @@
             if (retryCount < config.maxRetries) {
                 console.log(`AI request failed, retrying (${retryCount + 1}/${config.maxRetries})...`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                return sendToAI(imageDataUrl, retryCount + 1);
+                return sendToAI({ imageDataUrl, imageUrl }, retryCount + 1);
             }
             throw error;
         }
@@ -668,17 +710,8 @@
 
         DEBUG.log('Process', 'Starting image processing');
 
-        const img = getElement(SELECTORS.uploadPreview) ||
-              document.querySelector('.upload_preview_container .upload_preview_img') ||
-              document.querySelector('.upload_preview_img') ||
-              document.querySelector('#image') ||
-              document.querySelector('.original-file-unchanged') ||
-              document.querySelector('#image-container img') ||
-              document.querySelector('img[id^="image-"]') ||
-              document.querySelector('.image-container img') ||
-              document.querySelector('#preview img');
-
-        if (!img) {
+        const previewImage = getPreviewImageElement();
+        if (!previewImage) {
             DEBUG.error('Process', 'Could not find image preview');
             alert("Could not find the image preview. Please try again.");
             return;
@@ -688,24 +721,23 @@
         button.style.opacity = "0.5";
         if (throbber) textarea.parentElement.insertBefore(throbber, textarea);
 
-        DEBUG.log('Process', 'Found image', { src: img.src, width: img.width, height: img.height });
-
         try {
-            DEBUG.log('Process', 'Fetching image blob');
-            const imageBlob = await fetchImage(img.src);
-            DEBUG.log('Process', 'Image blob fetched', { size: imageBlob.size, type: imageBlob.type });
+            const isUploadPage = window.location.href.includes('/uploads/new');
+            const sourceUrl = getUploadSourceUrl();
+            const previewUrl = previewImage.src?.trim() || '';
+            const candidateUrl = isUploadPage && sourceUrl ? sourceUrl : previewUrl;
 
-            const reader = new FileReader();
-            const imageDataUrl = await new Promise((resolve, reject) => {
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(imageBlob);
-            });
-
-            DEBUG.log('Process', 'Image converted to base64', { dataUrlLength: imageDataUrl.length });
-
-            DEBUG.log('Process', 'Sending image to AI for processing');
-            const aiResponse = await sendToAI(imageDataUrl);
+            let aiResponse;
+            if (/^https?:\/\//i.test(candidateUrl)) {
+                DEBUG.log('Process', 'Sending image URL to AI for processing', { imageUrl: candidateUrl });
+                aiResponse = await sendToAI({ imageUrl: candidateUrl });
+            } else {
+                DEBUG.log('Process', 'Converting preview image to base64 for processing');
+                const imageDataUrl = await imageElementToDataUrl(previewImage);
+                DEBUG.log('Process', 'Image converted to base64', { dataUrlLength: imageDataUrl.length });
+                DEBUG.log('Process', 'Sending image data to AI for processing');
+                aiResponse = await sendToAI({ imageDataUrl });
+            }
 
             DEBUG.log('Process', 'Received AI response', aiResponse);
 

@@ -119,7 +119,7 @@ jobs:
           4. Before using the autotagger, run \`app.bat\` and leave it running
           5. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
 
-          **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
+          **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger - see README.md for details."
           else
             echo "Creating new release $VERSION"
             gh release create "$VERSION" "$BUNDLE_FILE" \
@@ -138,7 +138,7 @@ jobs:
           4. Before using the autotagger, run \`app.bat\` and leave it running
           5. Configure the AI endpoint in the script settings (defaults to \`http://127.0.0.1:7860/api/e6\`)
 
-          **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger – see README.md for details."
+          **Note**: This repo includes a custom local JTP-3 Hydra backend for the autotagger - see README.md for details."
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

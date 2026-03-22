@@ -260,7 +260,8 @@ def filter_tags(
 
 
 class E6PredictRequest(BaseModel):
-    image: str
+    image: str | None = None
+    image_url: str | None = None
     confidence: float = 0.25
 
 
@@ -281,19 +282,39 @@ async def e6_predict(payload: E6PredictRequest):
     """
     Lightweight HTTP API for external clients (e.g. Tampermonkey script).
 
-    Expects a base64 data URL or raw base64 image string and a confidence
-    threshold. Returns a single-element `data` list containing the
-    comma-separated tag string, matching the legacy E6AutoTagger format.
+    Expects either:
+    - `image`: a base64 data URL or raw base64 image string, or
+    - `image_url`: an http(s) URL that the local backend can fetch.
+    Also accepts a confidence threshold.
+    Returns a single-element `data` list containing the comma-separated
+    tag string, matching the legacy E6AutoTagger format.
     """
-    image_data = payload.image.strip()
     try:
-        if "," in image_data:
-            _, image_data = image_data.split(",", 1)
+        if payload.image_url:
+            image_url = payload.image_url.strip()
+            if not image_url.lower().startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail="image_url must be http(s)")
 
-        image_bytes = base64.b64decode(image_data)
-        image = Image.open(BytesIO(image_bytes))
+            response = requests.get(
+                image_url,
+                timeout=30,
+                headers={"User-Agent": "E6AutoTagger/2.4.5 (+local backend)"},
+            )
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content))
+        elif payload.image:
+            image_data = payload.image.strip()
+            if "," in image_data:
+                _, image_data = image_data.split(",", 1)
+
+            image_bytes = base64.b64decode(image_data)
+            image = Image.open(BytesIO(image_bytes))
+        else:
+            raise HTTPException(status_code=400, detail="Provide image or image_url")
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="Invalid image data") from exc
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=400, detail="Invalid image input") from exc
 
     processed_image = process_image(image, PATCH_SIZE, MAX_SEQ_LEN)
     _, predictions = run_classifier(processed_image, cam_depth=1)
