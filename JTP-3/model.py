@@ -1,3 +1,6 @@
+# Modified by Kebolder for E6AutoTagger.
+# Original file remains licensed under the Apache License, Version 2.0. See /LICENSE.
+
 from math import ceil
 
 import torch

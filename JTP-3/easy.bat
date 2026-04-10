@@ -1,3 +1,6 @@
+@rem Modified by Kebolder for E6AutoTagger.
+@rem Original file remains licensed under the Apache License, Version 2.0. See /LICENSE.
+
 @echo off
 title JTP-3 Hydra
 
